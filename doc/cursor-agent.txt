@@ -1,0 +1,40 @@
+*cursor-agent.txt*     Cursor Agent integration for Neovim
+
+Cursor Agent plugin provides a lightweight bridge between Neovim and the
+Cursor Agent CLI.
+
+USAGE                                            *cursor-agent-usage*
+
+  :CursorAgent
+      Toggle the interactive Cursor Agent terminal in the project root.
+
+  :CursorAgentSelection
+      Send the current visual selection to Cursor Agent.
+
+  :CursorAgentBuffer
+      Send the entire current buffer to Cursor Agent.
+
+CONFIGURATION                                    *cursor-agent-config*
+
+Use Lua to configure in your init.lua:
+>
+  require('cursor-agent').setup({
+    cmd = 'cursor-agent',     -- or { 'cursor-agent', 'cli' }
+    args = {},                -- default extra args
+    use_stdin = true,         -- send content via stdin
+    multi_instance = true,    -- allow concurrent calls
+    timeout_ms = 60000,
+  })
+<
+
+NOTES                                             *cursor-agent-notes*
+
+- The plugin uses a floating terminal to render Cursor Agent's native UI. The
+- terminal starts in the project root (detected via markers like `.git`).
+- Configure `cmd` to point to your Cursor Agent CLI. If the executable is
+  missing, an error is shown.
+- For help tags: :helptags ALL or :helptags {plugin-doc-dir}
+
+LICENSE                                           *cursor-agent-license*
+
+MIT
