@@ -1,6 +1,6 @@
 ## Cursor Agent Neovim Plugin 
 
-A minimal Neovim plugin to run the Cursor Agent CLI inside a centered floating terminal. Toggle an interactive terminal at your project root, or send the current buffer or a visual selection to Cursor Agent.
+A minimal Neovim plugin to run the Cursor Agent CLI inside a terminal window. Toggle an interactive terminal at your project root, or send the current buffer or a visual selection to Cursor Agent. Supports both floating window and sidebar modes.
 
 ### Requirements
 - **Cursor Agent CLI**: `cursor-agent` available on your `$PATH`
@@ -42,22 +42,39 @@ Note: The plugin auto-initializes with defaults on load (via `after/plugin/curso
 
 ## Quickstart
 
-- Run `:CursorAgent` to toggle an interactive floating terminal in your project root. Type directly into the `cursor-agent` program.
+- Run `:CursorAgent` to toggle an interactive terminal in your project root. Type directly into the `cursor-agent` program.
 - Visually select code, then use `:CursorAgentSelection` to ask about just that selection.
 - Run `:CursorAgentBuffer` to send the entire current buffer (handy for files like `cursor.md`).
-- Press `q` in normal mode in the floating terminal to close it or run :CursorAgent `<leader>ca` to toggle it away.
+- Press `q` in normal mode to close the terminal or run `:CursorAgent` / `<leader>ca` to toggle it away.
 
-All interactions happen in a centered floating terminal.
+By default, interactions happen in a centered floating window. You can configure the plugin to use an attached sidebar instead (see Configuration section).
 
 ## Commands
 
-- **:CursorAgent**: Toggle the interactive Cursor Agent terminal (project root).
+- **:CursorAgent**: Toggle the interactive Cursor Agent terminal (project root). Uses your configured window mode.
 - **:CursorAgentSelection**: Send the current visual selection (writes to a temp file and opens terminal rendering).
 - **:CursorAgentBuffer**: Send the full current buffer (writes to a temp file and opens terminal rendering).
+
+### Window Mode Behavior
+
+#### Floating Mode (default)
+- Opens a centered floating window
+- Title bar shows "Cursor Agent"  
+- Rounded borders
+- Press `q` in normal mode to close
+
+#### Attached Mode (Sidebar)
+- Opens as a vertical split
+- Can be positioned on left or right side
+- Configurable width as fraction of screen (e.g., 0.2 = 20%)
+- Press `q` in normal mode to close
+- Window integrates with your existing split layout
 
 ## Configuration
 
 Only set what you need. For typical usage, `cmd` and `args` are enough.
+
+### Basic Configuration
 ```lua
 require("cursor-agent").setup({
   -- Executable or argv table. Example: "cursor-agent" or {"/usr/local/bin/cursor-agent"}
@@ -67,7 +84,56 @@ require("cursor-agent").setup({
 })
 ```
 
-Advanced (for lower-level CLI helpers present in the codebase but not required for terminal mode):
+### Window Mode Configuration
+
+The plugin supports two window modes: floating (default) and attached (sidebar).
+
+#### Default Configuration (Floating Window)
+```lua
+require("cursor-agent").setup({
+  -- Default behavior - opens in floating window
+  window_mode = "floating",  -- or omit this line for default
+})
+```
+
+#### Attached Mode (Sidebar) - Right Side
+```lua
+require("cursor-agent").setup({
+  window_mode = "attached",
+  position = "right",        -- Opens on right side
+  width = 0.2,              -- 1/5 of screen width
+})
+```
+
+#### Attached Mode (Sidebar) - Left Side  
+```lua
+require("cursor-agent").setup({
+  window_mode = "attached",
+  position = "left",         -- Opens on left side
+  width = 0.25,             -- 1/4 of screen width
+})
+```
+
+### Complete Configuration Example
+```lua
+require("cursor-agent").setup({
+  -- Standard options
+  cmd = "cursor-agent",
+  args = {},
+  use_stdin = true,
+  multi_instance = false,
+  timeout_ms = 60000,
+  auto_scroll = true,
+  
+  -- Window mode options
+  window_mode = "attached",   -- Use split window instead of floating
+  position = "right",         -- Position on right side
+  width = 0.2,               -- Use 1/5 of screen width (20%)
+})
+```
+
+### Advanced Options
+For lower-level CLI helpers present in the codebase but not required for terminal mode:
 ```lua
 require("cursor-agent").setup({
   -- Whether to send content via stdin when using non-terminal helpers
@@ -118,7 +184,9 @@ This opens a floating terminal using `termopen`, with the working directory set 
 
 ## How it works
 
-- A floating terminal is created with `termopen`, centered, wrapped, and ready for immediate input.
+- A terminal window is created with `termopen`, ready for immediate input. Window mode depends on your configuration:
+  - **Floating mode**: Creates a centered floating window with rounded borders
+  - **Attached mode**: Creates a vertical split positioned on the left or right side
 - The terminal starts in the detected project root so Cursor Agent has the right context.
 - For selection/buffer commands, the text is written to a temporary file and its path is passed to the CLI as a positional argument.
 
