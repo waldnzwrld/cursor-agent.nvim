@@ -67,24 +67,40 @@ function M.ask(opts)
   end
 
   local root = util.get_project_root()
-  termui.open_float_term({
-    argv = argv,
-    title = title,
-    border = 'rounded',
-    width = 0.6,
-    height = 0.6,
-    cwd = root,
-    on_exit = function(code)
-      if code ~= 0 then
-        util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
-      end
-    end,
-  })
+  
+  if cfg.window_mode == "attached" then
+    termui.open_split_term({
+      argv = argv,
+      position = cfg.position,
+      width = cfg.width,
+      cwd = root,
+      on_exit = function(code)
+        if code ~= 0 then
+          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
+        end
+      end,
+    })
+  else
+    termui.open_float_term({
+      argv = argv,
+      title = title,
+      border = 'rounded',
+      width = 0.6,
+      height = 0.6,
+      cwd = root,
+      on_exit = function(code)
+        if code ~= 0 then
+          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
+        end
+      end,
+    })
+  end
 end
 
 -- Toggle a long-lived cursor-agent terminal at project root
 function M.toggle_terminal()
   local st = M._term_state
+  local cfg = config.get()
 
   -- If window is open, close it (toggle off)
   if st.win and vim.api.nvim_win_is_valid(st.win) then
@@ -104,34 +120,59 @@ function M.toggle_terminal()
 
   -- If we have a valid buffer with a live job, just reopen a window for it
   if st.bufnr and vim.api.nvim_buf_is_valid(st.bufnr) and job_is_alive(st.job_id) then
-    st.win = termui.open_float_win_for_buf(st.bufnr, {
-      title = 'Cursor Agent',
-      border = 'rounded',
-      width = 0.6,
-      height = 0.6,
-    })
+    if cfg.window_mode == "attached" then
+      st.win = termui.open_split_win_for_buf(st.bufnr, {
+        position = cfg.position,
+        width = cfg.width,
+      })
+    else
+      st.win = termui.open_float_win_for_buf(st.bufnr, {
+        title = 'Cursor Agent',
+        border = 'rounded',
+        width = 0.6,
+        height = 0.6,
+      })
+    end
     return st.bufnr, st.win
   end
 
   -- Otherwise spawn a fresh terminal
-  local cfg = config.get()
   local argv = util.concat_argv(util.to_argv(cfg.cmd), cfg.args)
   local root = util.get_project_root()
-  local bufnr, win, job_id = termui.open_float_term({
-    argv = argv,
-    title = 'Cursor Agent',
-    border = 'rounded',
-    width = 0.6,
-    height = 0.6,
-    cwd = root,
-    on_exit = function(code)
-      -- Clear stored job id when it exits
-      if M._term_state then M._term_state.job_id = nil end
-      if code ~= 0 then
-        util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
-      end
-    end,
-  })
+  local bufnr, win, job_id
+  
+  if cfg.window_mode == "attached" then
+    bufnr, win, job_id = termui.open_split_term({
+      argv = argv,
+      position = cfg.position,
+      width = cfg.width,
+      cwd = root,
+      on_exit = function(code)
+        -- Clear stored job id when it exits
+        if M._term_state then M._term_state.job_id = nil end
+        if code ~= 0 then
+          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
+        end
+      end,
+    })
+  else
+    bufnr, win, job_id = termui.open_float_term({
+      argv = argv,
+      title = 'Cursor Agent',
+      border = 'rounded',
+      width = 0.6,
+      height = 0.6,
+      cwd = root,
+      on_exit = function(code)
+        -- Clear stored job id when it exits
+        if M._term_state then M._term_state.job_id = nil end
+        if code ~= 0 then
+          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
+        end
+      end,
+    })
+  end
+  
   st.bufnr, st.win, st.job_id = bufnr, win, job_id
   return bufnr, win
 end

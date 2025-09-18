@@ -19,20 +19,53 @@ CONFIGURATION                                    *cursor-agent-config*
 Use Lua to configure in your init.lua:
 >
   require('cursor-agent').setup({
-    cmd = 'cursor-agent',     -- or { 'cursor-agent', 'cli' }
-    args = {},                -- default extra args
-    use_stdin = true,         -- send content via stdin
-    multi_instance = true,    -- allow concurrent calls
+    cmd = 'cursor-agent',       -- or { 'cursor-agent', 'cli' }
+    args = {},                  -- default extra args
+    use_stdin = true,           -- send content via stdin
+    multi_instance = true,      -- allow concurrent calls
     timeout_ms = 60000,
+    window_mode = 'floating',   -- 'floating' or 'attached' (split)
+    position = 'right',         -- 'left' or 'right' (for attached mode)
+    width = 0.2,                -- width fraction (e.g., 0.2 = 1/5 screen)
+  })
+<
+
+WINDOW MODES                                     *cursor-agent-window-modes*
+
+The plugin supports two window modes:
+
+- `floating` (default): Opens in a centered floating window
+- `attached`: Opens in a vertical split pane
+
+For attached mode, you can configure:
+- `position`: 'left' or 'right' side of screen (default: 'right')  
+- `width`: fraction of screen width (default: 0.2 for 1/5 of screen)
+
+Examples:
+>
+  -- Open in right split at 1/5 screen width
+  require('cursor-agent').setup({
+    window_mode = 'attached',
+    position = 'right',
+    width = 0.2,
+  })
+
+  -- Open in left split at 1/4 screen width  
+  require('cursor-agent').setup({
+    window_mode = 'attached',
+    position = 'left',
+    width = 0.25,
   })
 <
 
 NOTES                                             *cursor-agent-notes*
 
-- The plugin uses a floating terminal to render Cursor Agent's native UI. The
-- terminal starts in the project root (detected via markers like `.git`).
+- The plugin uses a terminal window (floating or split pane) to render Cursor
+  Agent's native UI. The terminal starts in the project root (detected via
+  markers like `.git`).
 - Configure `cmd` to point to your Cursor Agent CLI. If the executable is
   missing, an error is shown.
+- In both window modes, press 'q' in normal mode to close the window.
 - For help tags: :helptags ALL or :helptags {plugin-doc-dir}
 
 LICENSE                                           *cursor-agent-license*
