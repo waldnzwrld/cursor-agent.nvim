@@ -10,6 +10,34 @@ local function resolve_size(value, total)
   return math.floor(total * 0.6)
 end
 
+---Open a split window for displaying output
+---@param opts table
+---@field position string|nil "left" or "right" (defaults to "right")
+---@field width number|nil Width in columns or 0-1 float for percentage (defaults to 0.2)
+---@return integer bufnr, integer win
+function M.open_split(opts)
+  opts = opts or {}
+  local position = opts.position or "right"
+  local width = resolve_size(opts.width or 0.2, vim.o.columns)
+
+  local bufnr = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_option(bufnr, "bufhidden", "wipe")
+  vim.api.nvim_buf_set_option(bufnr, "filetype", "cursor-agent-output")
+
+  -- Create the split window
+  local split_cmd = position == "left" and "leftabove vertical " or "rightbelow vertical "
+  split_cmd = split_cmd .. width .. "split"
+  
+  vim.cmd(split_cmd)
+  local win = vim.api.nvim_get_current_win()
+  vim.api.nvim_win_set_buf(win, bufnr)
+
+  vim.wo[win].wrap = true
+  vim.wo[win].cursorline = false
+
+  return bufnr, win
+end
+
 function M.open_float(opts)
   opts = opts or {}
   local width = resolve_size(opts.width or 0.5, vim.o.columns)

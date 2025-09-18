@@ -13,6 +13,12 @@ local default_config = {
   timeout_ms = 60000,
   -- Auto-scroll output buffer to the end as new content arrives
   auto_scroll = true,
+  -- Window mode: "floating" or "attached" (split window)
+  window_mode = "floating",
+  -- Position for attached mode: "left" or "right"
+  position = "right",
+  -- Width for attached mode (fraction of screen width, e.g., 0.2 for 1/5 of screen)
+  width = 0.2,
 }
 
 local active_config = vim.deepcopy(default_config)
