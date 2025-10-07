@@ -74,6 +74,19 @@ function M.open_float_term(opts)
     M.close(win)
   end, { buffer = bufnr, nowait = true, silent = true })
 
+  -- Add ESC key to close the floating window in normal, insert, and terminal modes
+  pcall(vim.keymap.set, 'n', '<Esc>', function()
+    M.close(win)
+  end, { buffer = bufnr, nowait = true, silent = true })
+
+  pcall(vim.keymap.set, 'i', '<Esc>', function()
+    M.close(win)
+  end, { buffer = bufnr, nowait = true, silent = true })
+
+  pcall(vim.keymap.set, 't', '<Esc>', function()
+    M.close(win)
+  end, { buffer = bufnr, nowait = true, silent = true })
+
   -- Jump to bottom and enter terminal-mode for immediate typing
   local ok_lines, line_count = pcall(vim.api.nvim_buf_line_count, bufnr)
   if ok_lines then pcall(vim.api.nvim_win_set_cursor, win, { line_count, 0 }) end
@@ -115,6 +128,19 @@ function M.open_float_win_for_buf(bufnr, opts)
 
   -- Ensure the convenience close mapping exists on this buffer
   pcall(vim.keymap.set, 'n', 'q', function()
+    M.close(win)
+  end, { buffer = bufnr, nowait = true, silent = true })
+
+  -- Add ESC key to close the floating window in normal, insert, and terminal modes
+  pcall(vim.keymap.set, 'n', '<Esc>', function()
+    M.close(win)
+  end, { buffer = bufnr, nowait = true, silent = true })
+
+  pcall(vim.keymap.set, 'i', '<Esc>', function()
+    M.close(win)
+  end, { buffer = bufnr, nowait = true, silent = true })
+
+  pcall(vim.keymap.set, 't', '<Esc>', function()
     M.close(win)
   end, { buffer = bufnr, nowait = true, silent = true })
 
