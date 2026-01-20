@@ -2,11 +2,13 @@
 local M = {}
 
 local uv = vim.uv or vim.loop
+local highlight = require('cursor-agent.highlight')
 
 -- State for file watchers
 M._watchers = {} -- { [filepath] = { handle = uv.fs_event, bufnr = number } }
 M._enabled = false
 M._debounce_timers = {} -- { [filepath] = timer_handle }
+M._pending_reloads = {} -- { [filepath] = { bufnr = number, old_lines = string[] } }
 
 local DEBOUNCE_MS = 100 -- Debounce file change events
 
@@ -41,6 +43,9 @@ local function reload_buffer(bufnr, filepath)
     if not vim.api.nvim_buf_is_valid(bufnr) then return end
     if vim.bo[bufnr].modified then return end
     
+    -- Capture buffer contents BEFORE reload for highlighting
+    local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    
     -- Save cursor position
     local wins = vim.fn.win_findbuf(bufnr)
     local cursors = {}
@@ -68,6 +73,9 @@ local function reload_buffer(bufnr, filepath)
           pcall(vim.api.nvim_win_set_cursor, win, { row, col })
         end
       end
+      
+      -- Highlight the changes
+      highlight.highlight_buffer_changes(bufnr, old_lines)
     end
   end)
 end

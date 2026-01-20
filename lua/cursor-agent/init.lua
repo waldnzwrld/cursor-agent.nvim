@@ -3,6 +3,7 @@ local context = require('cursor-agent.context')
 local util = require('cursor-agent.util')
 local termui = require('cursor-agent.ui.term')
 local autoload = require('cursor-agent.autoload')
+local highlight = require('cursor-agent.highlight')
 
 local M = {}
 
@@ -83,6 +84,22 @@ function M._register_commands()
     nargs = '?',
     complete = function() return { 'on', 'off', 'toggle' } end,
     desc = 'Toggle or set auto-reload for external file changes' 
+  })
+
+  -- Command to clear change highlights
+  vim.api.nvim_create_user_command('CursorAgentClearHighlights', function(opts)
+    local arg = opts.args:lower()
+    if arg == 'all' then
+      highlight.clear_all_highlights()
+      util.notify('Cleared all change highlights', vim.log.levels.INFO)
+    else
+      highlight.clear_highlights()
+      util.notify('Cleared change highlights in current buffer', vim.log.levels.INFO)
+    end
+  end, {
+    nargs = '?',
+    complete = function() return { 'all' } end,
+    desc = 'Clear Cursor Agent change highlights (use "all" to clear all buffers)'
   })
 end
 

@@ -21,6 +21,10 @@ local default_config = {
   width = 0.2,
   -- Automatically reload buffers when files are modified by Cursor CLI
   auto_reload = true,
+  -- Highlight lines modified by Cursor Agent until next buffer modification
+  highlight_changes = true,
+  -- Highlight group for modified lines (created automatically if not defined)
+  highlight_group = "CursorAgentChange",
 }
 
 local active_config = vim.deepcopy(default_config)
