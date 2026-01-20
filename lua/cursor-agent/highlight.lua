@@ -188,30 +188,39 @@ function M.setup_clear_on_modify(bufnr)
   -- Clear existing group if it exists
   pcall(vim.api.nvim_del_augroup_by_name, group_name)
   
-  local group = vim.api.nvim_create_augroup(group_name, { clear = true })
-  
-  -- Clear highlights when user modifies the buffer
-  vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
-    group = group,
-    buffer = bufnr,
-    once = true,
-    callback = function()
-      M.clear_highlights(bufnr)
-      -- Clean up this autocmd group
-      pcall(vim.api.nvim_del_augroup_by_name, group_name)
-    end,
-  })
-  
-  -- Also clear on buffer delete
-  vim.api.nvim_create_autocmd({ 'BufDelete', 'BufWipeout' }, {
-    group = group,
-    buffer = bufnr,
-    once = true,
-    callback = function()
-      M._highlighted_buffers[bufnr] = nil
-      pcall(vim.api.nvim_del_augroup_by_name, group_name)
-    end,
-  })
+  -- Defer autocmd setup to avoid catching the TextChanged event from the reload itself.
+  -- The :edit! command triggers TextChanged, and if we set up the listener immediately,
+  -- it will fire and clear the highlights we just applied.
+  vim.defer_fn(function()
+    -- Guard: buffer may have become invalid or highlights may have been cleared
+    if not vim.api.nvim_buf_is_valid(bufnr) then return end
+    if not M._highlighted_buffers[bufnr] then return end
+    
+    local group = vim.api.nvim_create_augroup(group_name, { clear = true })
+    
+    -- Clear highlights when user modifies the buffer
+    vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
+      group = group,
+      buffer = bufnr,
+      once = true,
+      callback = function()
+        M.clear_highlights(bufnr)
+        -- Clean up this autocmd group
+        pcall(vim.api.nvim_del_augroup_by_name, group_name)
+      end,
+    })
+    
+    -- Also clear on buffer delete
+    vim.api.nvim_create_autocmd({ 'BufDelete', 'BufWipeout' }, {
+      group = group,
+      buffer = bufnr,
+      once = true,
+      callback = function()
+        M._highlighted_buffers[bufnr] = nil
+        pcall(vim.api.nvim_del_augroup_by_name, group_name)
+      end,
+    })
+  end, 50) -- Small delay to let TextChanged from reload clear the event queue
 end
 
 ---Check if a buffer has active highlights
