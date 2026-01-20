@@ -10,7 +10,7 @@ A minimal Neovim plugin to run the Cursor Agent CLI inside a terminal window. To
 ### lazy.nvim
 ```lua
 {
-  "waldnzwrld/cursor-agent.nvim",
+  "Waldnzwrld/cursor-agent.nvim",
   config = function()
     vim.keymap.set("n", "<leader>ca", ":CursorAgent<CR>", { desc = "Cursor Agent: Toggle terminal" })
     vim.keymap.set("v", "<leader>ca", ":CursorAgentSelection<CR>", { desc = "Cursor Agent: Send selection" })
@@ -22,7 +22,7 @@ A minimal Neovim plugin to run the Cursor Agent CLI inside a terminal window. To
 ### packer.nvim
 ```lua
 use({
-  "waldnzwrld/cursor-agent.nvim",
+  "Waldnzwrld/cursor-agent.nvim",
   config = function()
     require("cursor-agent").setup({})
   end,
@@ -31,7 +31,7 @@ use({
 
 ### vim-plug
 ```vim
-Plug 'waldnzwrld/cursor-agent.nvim'
+Plug 'Waldnzwrld/cursor-agent.nvim'
 ```
 Then in your `init.lua`:
 ```lua

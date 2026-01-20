@@ -11,8 +11,12 @@ M._debounce_timers = {} -- { [filepath] = timer_handle }
 M._reloading = {} -- { [filepath] = true } -- Guard against re-entrancy
 M._cooldown = {} -- { [filepath] = timestamp } -- Cooldown after reload
 
+-- Session state: when a cursor agent session is active, queue changes instead of reloading
+M._session_active = false
+M._pending_files = {} -- { [filepath] = { bufnr = number, old_lines = string[] } } -- Files changed during session
+
 local DEBOUNCE_MS = 100 -- Debounce file change events
-local COOLDOWN_MS = 1000 -- Ignore events for this long after a reload
+local COOLDOWN_MS = 500 -- Ignore events for this long after a reload
 
 ---Check if a buffer should be auto-reloaded
 ---@param bufnr integer
@@ -31,10 +35,27 @@ local function should_reload_buffer(bufnr)
   return true
 end
 
----Reload a buffer from disk
+---Queue a file for later reload (when session ends)
 ---@param bufnr integer
 ---@param filepath string
-local function reload_buffer(bufnr, filepath)
+local function queue_file_change(bufnr, filepath)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  
+  -- Only capture old_lines on first change (preserve original state before cursor agent started)
+  if not M._pending_files[filepath] then
+    local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    M._pending_files[filepath] = {
+      bufnr = bufnr,
+      old_lines = old_lines,
+    }
+  end
+end
+
+---Reload a buffer from disk (immediate mode, for when session is NOT active)
+---@param bufnr integer
+---@param filepath string
+---@param old_lines string[]|nil Optional pre-captured old lines for highlighting
+local function reload_buffer(bufnr, filepath, old_lines)
   if not should_reload_buffer(bufnr) then return end
   
   -- Guard: Don't reload if already reloading this file
@@ -63,8 +84,8 @@ local function reload_buffer(bufnr, filepath)
       return
     end
     
-    -- Capture buffer contents BEFORE reload for highlighting
-    local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    -- Capture buffer contents BEFORE reload for highlighting (if not provided)
+    local captured_old_lines = old_lines or vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
     
     -- Save cursor position
     local wins = vim.fn.win_findbuf(bufnr)
@@ -74,6 +95,9 @@ local function reload_buffer(bufnr, filepath)
         cursors[win] = vim.api.nvim_win_get_cursor(win)
       end
     end
+    
+    -- Mark that we're starting a reload (to ignore TextChanged events from edit!)
+    highlight.begin_reload(bufnr)
     
     -- Reload the buffer silently
     local ok, err = pcall(function()
@@ -99,9 +123,28 @@ local function reload_buffer(bufnr, filepath)
       end
       
       -- Highlight the changes
-      highlight.highlight_buffer_changes(bufnr, old_lines)
+      highlight.highlight_buffer_changes(bufnr, captured_old_lines)
+      
+      -- Mark reload complete (with delay to let TextChanged events clear)
+      highlight.end_reload(bufnr)
+    else
+      -- Mark reload complete even on failure
+      highlight.end_reload(bufnr)
     end
   end)
+end
+
+---Handle a file change event
+---@param bufnr integer
+---@param filepath string
+local function handle_file_change(bufnr, filepath)
+  if M._session_active then
+    -- Session active: queue the change, don't reload yet
+    queue_file_change(bufnr, filepath)
+  else
+    -- No session: reload immediately (original behavior)
+    reload_buffer(bufnr, filepath)
+  end
 end
 
 ---Start watching a file for changes
@@ -139,7 +182,7 @@ local function watch_file(filepath, bufnr)
           -- Re-check watcher still exists and buffer is valid
           local watcher = M._watchers[filepath]
           if watcher and vim.api.nvim_buf_is_valid(watcher.bufnr) then
-            reload_buffer(watcher.bufnr, filepath)
+            handle_file_change(watcher.bufnr, filepath)
           end
         end)
       end)
@@ -265,6 +308,40 @@ end
 ---Manually trigger a reload check on all watched buffers
 function M.check_all()
   pcall(vim.cmd, 'silent! checktime')
+end
+
+---Start a cursor agent session (queue changes instead of immediate reload)
+function M.start_session()
+  M._session_active = true
+  M._pending_files = {}
+end
+
+---End a cursor agent session and flush all pending file changes
+---This reloads all modified files and applies highlights
+function M.end_session()
+  M._session_active = false
+  
+  -- Process all pending files
+  local pending = M._pending_files
+  M._pending_files = {}
+  
+  -- Small delay to ensure cursor agent has finished writing files
+  vim.defer_fn(function()
+    for filepath, data in pairs(pending) do
+      local bufnr = data.bufnr
+      local old_lines = data.old_lines
+      
+      if vim.api.nvim_buf_is_valid(bufnr) and not vim.bo[bufnr].modified then
+        reload_buffer(bufnr, filepath, old_lines)
+      end
+    end
+  end, 200) -- 200ms delay to let any final writes complete
+end
+
+---Check if a session is currently active
+---@return boolean
+function M.is_session_active()
+  return M._session_active
 end
 
 return M

@@ -180,7 +180,25 @@ function M.clear_all_highlights()
   M._highlighted_buffers = {}
 end
 
----Set up autocmds to clear highlights when buffer is modified
+-- Track if we're in a reload-triggered TextChanged event (don't clear highlights)
+M._reload_in_progress = {} -- { [bufnr] = true }
+
+---Mark that a reload is starting (to ignore TextChanged events from edit!)
+---@param bufnr integer
+function M.begin_reload(bufnr)
+  M._reload_in_progress[bufnr] = true
+end
+
+---Mark that a reload has completed
+---@param bufnr integer
+function M.end_reload(bufnr)
+  -- Use a longer delay to ensure all TextChanged events from edit! have fired
+  vim.defer_fn(function()
+    M._reload_in_progress[bufnr] = nil
+  end, 300)
+end
+
+---Set up autocmds to clear highlights when buffer is modified BY THE USER
 ---@param bufnr integer
 function M.setup_clear_on_modify(bufnr)
   local group_name = 'CursorAgentHighlightClear_' .. bufnr
@@ -189,8 +207,7 @@ function M.setup_clear_on_modify(bufnr)
   pcall(vim.api.nvim_del_augroup_by_name, group_name)
   
   -- Defer autocmd setup to avoid catching the TextChanged event from the reload itself.
-  -- The :edit! command triggers TextChanged, and if we set up the listener immediately,
-  -- it will fire and clear the highlights we just applied.
+  -- Use a longer delay (500ms) to let edit! finish all its events.
   vim.defer_fn(function()
     -- Guard: buffer may have become invalid or highlights may have been cleared
     if not vim.api.nvim_buf_is_valid(bufnr) then return end
@@ -198,15 +215,20 @@ function M.setup_clear_on_modify(bufnr)
     
     local group = vim.api.nvim_create_augroup(group_name, { clear = true })
     
-    -- Clear highlights when user modifies the buffer
+    -- Clear highlights when user modifies the buffer (not from reload)
     vim.api.nvim_create_autocmd({ 'TextChanged', 'TextChangedI' }, {
       group = group,
       buffer = bufnr,
-      once = true,
       callback = function()
+        -- Ignore TextChanged events triggered by reload/edit!
+        if M._reload_in_progress[bufnr] then
+          return
+        end
+        
         M.clear_highlights(bufnr)
         -- Clean up this autocmd group
         pcall(vim.api.nvim_del_augroup_by_name, group_name)
+        return true -- Remove this autocmd after it fires
       end,
     })
     
@@ -220,7 +242,7 @@ function M.setup_clear_on_modify(bufnr)
         pcall(vim.api.nvim_del_augroup_by_name, group_name)
       end,
     })
-  end, 50) -- Small delay to let TextChanged from reload clear the event queue
+  end, 500) -- Longer delay to ensure edit! events have fully cleared
 end
 
 ---Check if a buffer has active highlights

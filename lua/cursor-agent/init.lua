@@ -123,17 +123,29 @@ function M.ask(opts)
 
   local root = util.get_project_root()
   
+  -- Start session before launching cursor agent
+  if cfg.auto_reload then
+    autoload.start_session()
+  end
+  
+  -- Common on_exit handler that ends the session
+  local function on_exit_handler(code)
+    -- End the session when cursor agent exits
+    if cfg.auto_reload then
+      autoload.end_session()
+    end
+    if code ~= 0 then
+      util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
+    end
+  end
+  
   if cfg.window_mode == "attached" then
     termui.open_split_term({
       argv = argv,
       position = cfg.position,
       width = cfg.width,
       cwd = root,
-      on_exit = function(code)
-        if code ~= 0 then
-          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
-        end
-      end,
+      on_exit = on_exit_handler,
     })
   else
     termui.open_float_term({
@@ -143,11 +155,7 @@ function M.ask(opts)
       width = 0.6,
       height = 0.6,
       cwd = root,
-      on_exit = function(code)
-        if code ~= 0 then
-          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
-        end
-      end,
+      on_exit = on_exit_handler,
     })
   end
 end
@@ -161,11 +169,10 @@ function M.toggle_terminal()
   if st.win and vim.api.nvim_win_is_valid(st.win) then
     vim.api.nvim_win_close(st.win, true)
     st.win = nil
-    -- Trigger buffer reload check after closing terminal
+    -- End the cursor agent session - this flushes all pending file changes
+    -- and applies highlights to files modified during the session
     if cfg.auto_reload then
-      vim.schedule(function()
-        autoload.check_all()
-      end)
+      autoload.end_session()
     end
     return
   end
@@ -181,6 +188,11 @@ function M.toggle_terminal()
 
   -- If we have a valid buffer with a live job, just reopen a window for it
   if st.bufnr and vim.api.nvim_buf_is_valid(st.bufnr) and job_is_alive(st.job_id) then
+    -- Start session when reopening the terminal
+    if cfg.auto_reload then
+      autoload.start_session()
+    end
+    
     if cfg.window_mode == "attached" then
       st.win = termui.open_split_win_for_buf(st.bufnr, {
         position = cfg.position,
@@ -197,24 +209,36 @@ function M.toggle_terminal()
     return st.bufnr, st.win
   end
 
+  -- Start session before spawning a new terminal
+  if cfg.auto_reload then
+    autoload.start_session()
+  end
+
   -- Otherwise spawn a fresh terminal
   local argv = util.concat_argv(util.to_argv(cfg.cmd), cfg.args)
   local root = util.get_project_root()
   local bufnr, win, job_id
   
+  -- Common on_exit handler for terminal job
+  local function on_job_exit(code)
+    -- Clear stored job id when it exits
+    if M._term_state then M._term_state.job_id = nil end
+    -- End the session when cursor agent job exits
+    if cfg.auto_reload then
+      autoload.end_session()
+    end
+    if code ~= 0 then
+      util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
+    end
+  end
+
   if cfg.window_mode == "attached" then
     bufnr, win, job_id = termui.open_split_term({
       argv = argv,
       position = cfg.position,
       width = cfg.width,
       cwd = root,
-      on_exit = function(code)
-        -- Clear stored job id when it exits
-        if M._term_state then M._term_state.job_id = nil end
-        if code ~= 0 then
-          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
-        end
-      end,
+      on_exit = on_job_exit,
     })
   else
     bufnr, win, job_id = termui.open_float_term({
@@ -224,13 +248,7 @@ function M.toggle_terminal()
       width = 0.6,
       height = 0.6,
       cwd = root,
-      on_exit = function(code)
-        -- Clear stored job id when it exits
-        if M._term_state then M._term_state.job_id = nil end
-        if code ~= 0 then
-          util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
-        end
-      end,
+      on_exit = on_job_exit,
     })
   end
   
