@@ -175,4 +175,45 @@ function M.get_marker_path()
   return M._marker_path
 end
 
+---Manually process the marker file (for debugging)
+function M.process_now()
+  if not M._marker_path then
+    local util = require('cursor-agent.util')
+    util.notify('Marker watcher not started', vim.log.levels.WARN)
+    return
+  end
+  
+  local stat = uv.fs_stat(M._marker_path)
+  if not stat then
+    local util = require('cursor-agent.util')
+    util.notify('Marker file not found: ' .. M._marker_path, vim.log.levels.WARN)
+    return
+  end
+  
+  local fd = uv.fs_open(M._marker_path, 'r', 438)
+  if not fd then
+    local util = require('cursor-agent.util')
+    util.notify('Could not open marker file', vim.log.levels.WARN)
+    return
+  end
+  
+  local content = uv.fs_read(fd, stat.size, 0)
+  uv.fs_close(fd)
+  
+  if content and content ~= '' then
+    local util = require('cursor-agent.util')
+    util.notify('Processing: ' .. content, vim.log.levels.INFO)
+    process_marker_content(content)
+    -- Clear the file
+    local wfd = uv.fs_open(M._marker_path, 'w', 438)
+    if wfd then
+      uv.fs_write(wfd, '', 0)
+      uv.fs_close(wfd)
+    end
+  else
+    local util = require('cursor-agent.util')
+    util.notify('Marker file is empty', vim.log.levels.INFO)
+  end
+end
+
 return M

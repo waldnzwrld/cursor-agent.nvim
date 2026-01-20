@@ -52,6 +52,35 @@ function M._register_commands()
     M.ask({ file = tmp, title = title })
   end, { desc = 'Send current buffer contents to Cursor Agent' })
 
+  -- Debug command to check marker watcher status
+  vim.api.nvim_create_user_command('CursorAgentDebug', function()
+    local path = marker_watcher.get_marker_path()
+    util.notify('Marker path: ' .. (path or 'nil'), vim.log.levels.INFO)
+    util.notify('Project root: ' .. util.get_project_root(), vim.log.levels.INFO)
+    
+    -- Try to manually process the marker file
+    if path then
+      local uv = vim.uv or vim.loop
+      local stat = uv.fs_stat(path)
+      if stat then
+        util.notify('Marker file exists, size: ' .. stat.size, vim.log.levels.INFO)
+        local fd = uv.fs_open(path, 'r', 438)
+        if fd then
+          local content = uv.fs_read(fd, stat.size, 0)
+          uv.fs_close(fd)
+          util.notify('Marker content: ' .. (content or 'empty'), vim.log.levels.INFO)
+        end
+      else
+        util.notify('Marker file does not exist', vim.log.levels.WARN)
+      end
+    end
+  end, { desc = 'Debug Cursor Agent marker watcher' })
+
+  -- Command to manually trigger reload from marker file
+  vim.api.nvim_create_user_command('CursorAgentProcessMarkers', function()
+    marker_watcher.process_now()
+  end, { desc = 'Manually process marker file' })
+
   -- Command to clear change highlights
   vim.api.nvim_create_user_command('CursorAgentClearHighlights', function(opts)
     local arg = opts.args:lower()
