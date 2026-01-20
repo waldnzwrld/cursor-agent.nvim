@@ -3,10 +3,11 @@ local context = require('cursor-agent.context')
 local util = require('cursor-agent.util')
 local termui = require('cursor-agent.ui.term')
 local highlight = require('cursor-agent.highlight')
+local marker_watcher = require('cursor-agent.marker_watcher')
 
 local M = {}
 
--- State for a single persistent floating terminal
+-- State for a single persistent terminal window
 M._term_state = {
   win = nil,
   bufnr = nil,
@@ -17,6 +18,9 @@ function M.setup(user_config)
   config.setup(user_config or {})
   M._register_commands()
   M._ensure_keymaps()
+  
+  -- Start watching for file modification markers
+  marker_watcher.start(util.get_project_root())
 end
 
 function M._register_commands()

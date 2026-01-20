@@ -1,7 +1,5 @@
 local M = {}
 
-local terminal_monitor = require('cursor-agent.terminal_monitor')
-
 local function resolve_size(value, total)
   if type(value) == "number" then
     if value > 0 and value < 1 then
@@ -74,9 +72,6 @@ function M.open_split_term(opts)
   vim.schedule(function()
     pcall(vim.cmd, 'startinsert')
   end)
-
-  -- Start monitoring terminal output for file modification markers
-  terminal_monitor.start_monitoring(bufnr)
 
   return bufnr, win, job_id
 end
@@ -202,9 +197,6 @@ function M.open_float_term(opts)
   vim.schedule(function()
     pcall(vim.cmd, 'startinsert')
   end)
-
-  -- Start monitoring terminal output for file modification markers
-  terminal_monitor.start_monitoring(bufnr)
 
   return bufnr, win, job_id
 end
