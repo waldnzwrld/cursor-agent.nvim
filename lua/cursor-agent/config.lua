@@ -19,10 +19,6 @@ local default_config = {
   position = "right",
   -- Width for attached mode (fraction of screen width, e.g., 0.2 for 1/5 of screen)
   width = 0.2,
-  -- Highlight lines modified by Cursor Agent until next buffer modification
-  highlight_changes = true,
-  -- Highlight group for modified lines (created automatically if not defined)
-  highlight_group = "CursorAgentChange",
 }
 
 local active_config = vim.deepcopy(default_config)

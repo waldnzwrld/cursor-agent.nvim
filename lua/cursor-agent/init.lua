@@ -2,7 +2,6 @@ local config = require('cursor-agent.config')
 local context = require('cursor-agent.context')
 local util = require('cursor-agent.util')
 local termui = require('cursor-agent.ui.term')
-local highlight = require('cursor-agent.highlight')
 local marker_watcher = require('cursor-agent.marker_watcher')
 
 local M = {}
@@ -83,22 +82,6 @@ function M._register_commands()
   vim.api.nvim_create_user_command('CursorAgentProcessMarkers', function()
     marker_watcher.process_now()
   end, { desc = 'Manually process marker file' })
-
-  -- Command to clear change highlights
-  vim.api.nvim_create_user_command('CursorAgentClearHighlights', function(opts)
-    local arg = opts.args:lower()
-    if arg == 'all' then
-      highlight.clear_all_highlights()
-      util.notify('Cleared all change highlights', vim.log.levels.INFO)
-    else
-      highlight.clear_highlights()
-      util.notify('Cleared change highlights in current buffer', vim.log.levels.INFO)
-    end
-  end, {
-    nargs = '?',
-    complete = function() return { 'all' } end,
-    desc = 'Clear Cursor Agent change highlights (use "all" to clear all buffers)'
-  })
 end
 
 function M.ask(opts)
