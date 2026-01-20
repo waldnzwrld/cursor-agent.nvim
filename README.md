@@ -1,4 +1,4 @@
-## Cursor Agent Neovim Plugin 
+## Cursor Agent Neovim Plugin
 
 A minimal Neovim plugin to run the Cursor Agent CLI inside a terminal window. Toggle an interactive terminal at your project root, or send the current buffer or a visual selection to Cursor Agent. Supports both floating window and sidebar modes.
 
@@ -10,7 +10,7 @@ A minimal Neovim plugin to run the Cursor Agent CLI inside a terminal window. To
 ### lazy.nvim
 ```lua
 {
-  "xTacobaco/cursor-agent.nvim",
+  "Waldnzwrld/cursor-agent.nvim",
   config = function()
     vim.keymap.set("n", "<leader>ca", ":CursorAgent<CR>", { desc = "Cursor Agent: Toggle terminal" })
     vim.keymap.set("v", "<leader>ca", ":CursorAgentSelection<CR>", { desc = "Cursor Agent: Send selection" })
@@ -22,7 +22,7 @@ A minimal Neovim plugin to run the Cursor Agent CLI inside a terminal window. To
 ### packer.nvim
 ```lua
 use({
-  "xTacobaco/cursor-agent.nvim",
+  "Waldnzwrld/cursor-agent.nvim",
   config = function()
     require("cursor-agent").setup({})
   end,
@@ -31,7 +31,7 @@ use({
 
 ### vim-plug
 ```vim
-Plug 'xTacobaco/cursor-agent.nvim'
+Plug 'Waldnzwrld/cursor-agent.nvim'
 ```
 Then in your `init.lua`:
 ```lua
@@ -54,6 +54,7 @@ By default, interactions happen in a centered floating window. You can configure
 - **:CursorAgent**: Toggle the interactive Cursor Agent terminal (project root). Uses your configured window mode.
 - **:CursorAgentSelection**: Send the current visual selection (writes to a temp file and opens terminal rendering).
 - **:CursorAgentBuffer**: Send the full current buffer (writes to a temp file and opens terminal rendering).
+- **:CursorAgentClearHighlights [all]**: Clear change highlights from the current buffer (or all buffers with "all").
 
 ### Window Mode Behavior
 
@@ -129,7 +130,24 @@ require("cursor-agent").setup({
   window_mode = "attached",   -- Use split window instead of floating
   position = "right",         -- Position on right side
   width = 0.2,               -- Use 1/5 of screen width (20%)
+  
+  -- Highlight options
+  highlight_changes = true,   -- Highlight modified lines
+  highlight_group = "CursorAgentChange",  -- Custom highlight group
 })
+```
+
+### Change Highlighting
+
+When Cursor Agent modifies files, the changed lines are highlighted in your buffers. This helps you quickly see what was modified.
+
+- Highlights persist until you make your own edits to the buffer
+- Use `:CursorAgentClearHighlights` to manually clear them
+- Customize the highlight color by defining the `CursorAgentChange` highlight group
+
+```lua
+-- Example: Custom highlight color (add to your config)
+vim.api.nvim_set_hl(0, 'CursorAgentChange', { bg = '#3d5940' })
 ```
 
 ### Advanced Options
@@ -189,6 +207,7 @@ This opens a floating terminal using `termopen`, with the working directory set 
   - **Attached mode**: Creates a vertical split positioned on the left or right side
 - The terminal starts in the detected project root so Cursor Agent has the right context.
 - For selection/buffer commands, the text is written to a temporary file and its path is passed to the CLI as a positional argument.
+- **Buffer synchronization**: The plugin monitors terminal output for file modification markers. When Cursor Agent modifies a file, it emits a marker that triggers an automatic buffer reload with change highlighting.
 
 ## Contributing
 
@@ -196,4 +215,4 @@ Contributions are welcome! If you have ideas or improvements, please open an iss
 
 ## Acknowledgements
 
-- Cursor Agent CLI by Cursor - This plugin was build entirely using GPT-5 in Cursor Agent CLI. Development cost: $0.45 with 10m 34s of API time.
+- Cursor Agent CLI by Cursor

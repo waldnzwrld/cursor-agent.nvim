@@ -2,10 +2,11 @@ local config = require('cursor-agent.config')
 local context = require('cursor-agent.context')
 local util = require('cursor-agent.util')
 local termui = require('cursor-agent.ui.term')
+local marker_watcher = require('cursor-agent.marker_watcher')
 
 local M = {}
 
--- State for a single persistent floating terminal
+-- State for a single persistent terminal window
 M._term_state = {
   win = nil,
   bufnr = nil,
@@ -16,6 +17,12 @@ function M.setup(user_config)
   config.setup(user_config or {})
   M._register_commands()
   M._ensure_keymaps()
+  
+  -- Start watching for file modification markers (legacy mechanism)
+  marker_watcher.start(util.get_project_root())
+  
+  -- Set up direct file watchers on open buffers (more reliable)
+  marker_watcher.setup_buffer_watchers()
 end
 
 function M._register_commands()
@@ -46,6 +53,35 @@ function M._register_commands()
     local tmp = util.write_tempfile(bufctx.content, '.txt')
     M.ask({ file = tmp, title = title })
   end, { desc = 'Send current buffer contents to Cursor Agent' })
+
+  -- Debug command to check marker watcher status
+  vim.api.nvim_create_user_command('CursorAgentDebug', function()
+    local path = marker_watcher.get_marker_path()
+    util.notify('Marker path: ' .. (path or 'nil'), vim.log.levels.INFO)
+    util.notify('Project root: ' .. util.get_project_root(), vim.log.levels.INFO)
+    
+    -- Try to manually process the marker file
+    if path then
+      local uv = vim.uv or vim.loop
+      local stat = uv.fs_stat(path)
+      if stat then
+        util.notify('Marker file exists, size: ' .. stat.size, vim.log.levels.INFO)
+        local fd = uv.fs_open(path, 'r', 438)
+        if fd then
+          local content = uv.fs_read(fd, stat.size, 0)
+          uv.fs_close(fd)
+          util.notify('Marker content: ' .. (content or 'empty'), vim.log.levels.INFO)
+        end
+      else
+        util.notify('Marker file does not exist', vim.log.levels.WARN)
+      end
+    end
+  end, { desc = 'Debug Cursor Agent marker watcher' })
+
+  -- Command to manually trigger reload from marker file
+  vim.api.nvim_create_user_command('CursorAgentProcessMarkers', function()
+    marker_watcher.process_now()
+  end, { desc = 'Manually process marker file' })
 end
 
 function M.ask(opts)
@@ -114,7 +150,6 @@ function M.toggle_terminal()
     if not job_id or job_id == 0 then return false end
     local ok, res = pcall(vim.fn.jobwait, { job_id }, 0)
     if not ok or type(res) ~= 'table' then return false end
-    -- In Neovim, -1 indicates the job is still running when timeout=0
     return res[1] == -1
   end
 
@@ -136,7 +171,7 @@ function M.toggle_terminal()
     return st.bufnr, st.win
   end
 
-  -- Otherwise spawn a fresh terminal
+  -- Spawn a fresh terminal
   local argv = util.concat_argv(util.to_argv(cfg.cmd), cfg.args)
   local root = util.get_project_root()
   local bufnr, win, job_id
@@ -148,7 +183,6 @@ function M.toggle_terminal()
       width = cfg.width,
       cwd = root,
       on_exit = function(code)
-        -- Clear stored job id when it exits
         if M._term_state then M._term_state.job_id = nil end
         if code ~= 0 then
           util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
@@ -164,7 +198,6 @@ function M.toggle_terminal()
       height = 0.6,
       cwd = root,
       on_exit = function(code)
-        -- Clear stored job id when it exits
         if M._term_state then M._term_state.job_id = nil end
         if code ~= 0 then
           util.notify(('cursor-agent exited with code %d'):format(code), vim.log.levels.WARN)
@@ -178,7 +211,6 @@ function M.toggle_terminal()
 end
 
 function M._ensure_keymaps()
-  -- Default mapping: <leader>ca toggles the floating terminal
   if not vim.g.cursor_agent_mapped then
     vim.keymap.set('n', '<leader>ca', function()
       require('cursor-agent').toggle_terminal()
