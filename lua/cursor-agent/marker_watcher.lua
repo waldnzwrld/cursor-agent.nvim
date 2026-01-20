@@ -1,17 +1,23 @@
--- Marker file watcher for Cursor Agent
--- Watches a marker file for file modification notifications
+-- File watcher for Cursor Agent
+-- Watches open buffer files for external modifications and reloads with highlighting
 local M = {}
 
 local uv = vim.uv or vim.loop
 local highlight = require('cursor-agent.highlight')
 
--- Marker file location (in the project root)
-local MARKER_FILENAME = '.cursor-agent-changes'
+-- Global marker file location (not project-specific)
+-- This allows Cursor Agent to write to a known location regardless of project
+local MARKER_PATH = vim.fn.expand('~/.cache/cursor-agent-changes')
 
 -- State
 M._watcher = nil
-M._marker_path = nil
 M._last_mtime = 0
+
+-- File watchers for individual buffers: { [bufnr] = { watcher = fs_event, filepath = string, mtime = number } }
+M._buffer_watchers = {}
+
+-- Debounce timers to avoid rapid-fire reloads
+M._debounce_timers = {}
 
 ---Process the marker file content
 ---@param content string
@@ -125,13 +131,14 @@ local function on_marker_change()
 end
 
 ---Start watching for marker file changes
----@param project_root string
+---@param project_root string (unused - kept for API compatibility)
 function M.start(project_root)
   if M._watcher then
     M.stop()
   end
   
-  M._marker_path = project_root .. '/' .. MARKER_FILENAME
+  -- Use the global marker path (not project-specific)
+  M._marker_path = MARKER_PATH
   M._last_mtime = 0
   
   -- Create the marker file if it doesn't exist
@@ -173,6 +180,182 @@ end
 ---@return string|nil
 function M.get_marker_path()
   return M._marker_path
+end
+
+---Reload a buffer from disk with highlighting
+---@param bufnr integer
+---@param filepath string
+local function reload_buffer_with_highlight(bufnr, filepath)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  
+  -- Don't reload if buffer has unsaved changes
+  if vim.bo[bufnr].modified then
+    local util = require('cursor-agent.util')
+    util.notify('Skipping reload: ' .. vim.fn.fnamemodify(filepath, ':t') .. ' (unsaved changes)', vim.log.levels.WARN)
+    return
+  end
+  
+  -- Capture old content for diff highlighting
+  local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  
+  -- Save cursor positions
+  local wins = vim.fn.win_findbuf(bufnr)
+  local cursors = {}
+  for _, win in ipairs(wins) do
+    if vim.api.nvim_win_is_valid(win) then
+      cursors[win] = vim.api.nvim_win_get_cursor(win)
+    end
+  end
+  
+  -- Mark reload in progress
+  highlight.begin_reload(bufnr)
+  
+  -- Reload the buffer
+  local ok = pcall(function()
+    vim.api.nvim_buf_call(bufnr, function()
+      vim.cmd('silent! edit!')
+    end)
+  end)
+  
+  if ok then
+    -- Restore cursor positions
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    for win, pos in pairs(cursors) do
+      if vim.api.nvim_win_is_valid(win) then
+        local row = math.min(pos[1], line_count)
+        local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ''
+        local col = math.min(pos[2], #line)
+        pcall(vim.api.nvim_win_set_cursor, win, { row, col })
+      end
+    end
+    
+    -- Apply highlights
+    highlight.highlight_buffer_changes(bufnr, old_lines)
+    highlight.end_reload(bufnr)
+    
+    local util = require('cursor-agent.util')
+    util.notify('Reloaded: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
+  else
+    highlight.end_reload(bufnr)
+  end
+end
+
+---Handle file change for a watched buffer
+---@param bufnr integer
+local function on_buffer_file_change(bufnr)
+  local info = M._buffer_watchers[bufnr]
+  if not info then return end
+  
+  local stat = uv.fs_stat(info.filepath)
+  if not stat then return end
+  
+  -- Check if file was actually modified (not just accessed)
+  local mtime = stat.mtime.sec * 1000 + (stat.mtime.nsec or 0) / 1000000
+  if mtime <= info.mtime then return end
+  info.mtime = mtime
+  
+  -- Debounce rapid changes
+  if M._debounce_timers[bufnr] then
+    M._debounce_timers[bufnr]:stop()
+  end
+  
+  M._debounce_timers[bufnr] = vim.defer_fn(function()
+    M._debounce_timers[bufnr] = nil
+    vim.schedule(function()
+      reload_buffer_with_highlight(bufnr, info.filepath)
+    end)
+  end, 100)
+end
+
+---Start watching a buffer's file for external changes
+---@param bufnr integer
+function M.watch_buffer(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return end
+  
+  -- Only watch normal file buffers
+  local buftype = vim.bo[bufnr].buftype
+  if buftype ~= '' then return end
+  
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+  if filepath == '' then return end
+  
+  -- Already watching this buffer
+  if M._buffer_watchers[bufnr] then return end
+  
+  -- Get initial mtime
+  local stat = uv.fs_stat(filepath)
+  if not stat then return end
+  
+  local mtime = stat.mtime.sec * 1000 + (stat.mtime.nsec or 0) / 1000000
+  
+  -- Create watcher
+  local watcher = uv.new_fs_event()
+  if not watcher then return end
+  
+  local ok = pcall(function()
+    watcher:start(filepath, {}, function(err, filename, events)
+      if err then return end
+      vim.schedule(function()
+        on_buffer_file_change(bufnr)
+      end)
+    end)
+  end)
+  
+  if ok then
+    M._buffer_watchers[bufnr] = {
+      watcher = watcher,
+      filepath = filepath,
+      mtime = mtime,
+    }
+  else
+    pcall(function() watcher:close() end)
+  end
+end
+
+---Stop watching a buffer's file
+---@param bufnr integer
+function M.unwatch_buffer(bufnr)
+  local info = M._buffer_watchers[bufnr]
+  if info then
+    pcall(function()
+      info.watcher:stop()
+      info.watcher:close()
+    end)
+    M._buffer_watchers[bufnr] = nil
+  end
+  
+  if M._debounce_timers[bufnr] then
+    M._debounce_timers[bufnr]:stop()
+    M._debounce_timers[bufnr] = nil
+  end
+end
+
+---Set up autocmds to watch buffers automatically
+function M.setup_buffer_watchers()
+  local group = vim.api.nvim_create_augroup('CursorAgentBufferWatch', { clear = true })
+  
+  -- Watch buffers when they are read/opened
+  vim.api.nvim_create_autocmd({ 'BufReadPost', 'BufNewFile' }, {
+    group = group,
+    callback = function(ev)
+      M.watch_buffer(ev.buf)
+    end,
+  })
+  
+  -- Stop watching when buffer is deleted
+  vim.api.nvim_create_autocmd({ 'BufDelete', 'BufWipeout' }, {
+    group = group,
+    callback = function(ev)
+      M.unwatch_buffer(ev.buf)
+    end,
+  })
+  
+  -- Watch all currently open buffers
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_loaded(bufnr) then
+      M.watch_buffer(bufnr)
+    end
+  end
 end
 
 ---Manually process the marker file (for debugging)

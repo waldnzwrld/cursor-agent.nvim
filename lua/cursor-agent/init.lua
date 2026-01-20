@@ -19,8 +19,11 @@ function M.setup(user_config)
   M._register_commands()
   M._ensure_keymaps()
   
-  -- Start watching for file modification markers
+  -- Start watching for file modification markers (legacy mechanism)
   marker_watcher.start(util.get_project_root())
+  
+  -- Set up direct file watchers on open buffers (more reliable)
+  marker_watcher.setup_buffer_watchers()
 end
 
 function M._register_commands()
