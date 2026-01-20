@@ -2,6 +2,7 @@ local config = require('cursor-agent.config')
 local context = require('cursor-agent.context')
 local util = require('cursor-agent.util')
 local termui = require('cursor-agent.ui.term')
+local autoload = require('cursor-agent.autoload')
 
 local M = {}
 
@@ -16,6 +17,12 @@ function M.setup(user_config)
   config.setup(user_config or {})
   M._register_commands()
   M._ensure_keymaps()
+  
+  -- Enable auto-reload if configured
+  local cfg = config.get()
+  if cfg.auto_reload then
+    autoload.enable(util.get_project_root())
+  end
 end
 
 function M._register_commands()
@@ -46,6 +53,37 @@ function M._register_commands()
     local tmp = util.write_tempfile(bufctx.content, '.txt')
     M.ask({ file = tmp, title = title })
   end, { desc = 'Send current buffer contents to Cursor Agent' })
+
+  -- Command to manually reload all buffers (check for external changes)
+  vim.api.nvim_create_user_command('CursorAgentReload', function()
+    autoload.check_all()
+    util.notify('Checked all buffers for external changes', vim.log.levels.INFO)
+  end, { desc = 'Reload buffers modified externally' })
+
+  -- Command to toggle auto-reload on/off
+  vim.api.nvim_create_user_command('CursorAgentAutoReload', function(opts)
+    local arg = opts.args:lower()
+    if arg == 'on' or arg == 'enable' or arg == '1' then
+      autoload.enable(util.get_project_root())
+      util.notify('Auto-reload enabled', vim.log.levels.INFO)
+    elseif arg == 'off' or arg == 'disable' or arg == '0' then
+      autoload.disable()
+      util.notify('Auto-reload disabled', vim.log.levels.INFO)
+    else
+      -- Toggle
+      if autoload.is_enabled() then
+        autoload.disable()
+        util.notify('Auto-reload disabled', vim.log.levels.INFO)
+      else
+        autoload.enable(util.get_project_root())
+        util.notify('Auto-reload enabled', vim.log.levels.INFO)
+      end
+    end
+  end, { 
+    nargs = '?',
+    complete = function() return { 'on', 'off', 'toggle' } end,
+    desc = 'Toggle or set auto-reload for external file changes' 
+  })
 end
 
 function M.ask(opts)
@@ -106,6 +144,12 @@ function M.toggle_terminal()
   if st.win and vim.api.nvim_win_is_valid(st.win) then
     vim.api.nvim_win_close(st.win, true)
     st.win = nil
+    -- Trigger buffer reload check after closing terminal
+    if cfg.auto_reload then
+      vim.schedule(function()
+        autoload.check_all()
+      end)
+    end
     return
   end
 

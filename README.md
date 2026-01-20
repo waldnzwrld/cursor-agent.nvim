@@ -54,6 +54,8 @@ By default, interactions happen in a centered floating window. You can configure
 - **:CursorAgent**: Toggle the interactive Cursor Agent terminal (project root). Uses your configured window mode.
 - **:CursorAgentSelection**: Send the current visual selection (writes to a temp file and opens terminal rendering).
 - **:CursorAgentBuffer**: Send the full current buffer (writes to a temp file and opens terminal rendering).
+- **:CursorAgentReload**: Manually check all buffers for external changes and reload them.
+- **:CursorAgentAutoReload [on|off]**: Enable, disable, or toggle automatic buffer reloading.
 
 ### Window Mode Behavior
 
@@ -129,7 +131,27 @@ require("cursor-agent").setup({
   window_mode = "attached",   -- Use split window instead of floating
   position = "right",         -- Position on right side
   width = 0.2,               -- Use 1/5 of screen width (20%)
+  
+  -- Auto-reload buffers when Cursor modifies files
+  auto_reload = true,         -- Enabled by default
 })
+```
+
+### Auto-Reload Feature
+
+When `auto_reload = true` (the default), buffers are automatically reloaded when Cursor CLI modifies files on disk. This ensures your editor always shows the latest content without manual intervention.
+
+How it works:
+- **File watchers**: Uses libuv file system events to detect changes in real-time
+- **Focus-based checks**: Runs `:checktime` when leaving the terminal window or when Neovim gains focus  
+- **Safe reloading**: Buffers with unsaved changes are never automatically reloaded
+
+You can control this feature with:
+```vim
+:CursorAgentAutoReload on    " Enable auto-reload
+:CursorAgentAutoReload off   " Disable auto-reload
+:CursorAgentAutoReload       " Toggle auto-reload
+:CursorAgentReload           " Manually check all buffers for changes
 ```
 
 ### Advanced Options
