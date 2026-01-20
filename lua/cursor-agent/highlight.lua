@@ -9,6 +9,10 @@ local ns_id = nil
 -- Track which buffers have active highlights
 M._highlighted_buffers = {} -- { [bufnr] = true }
 
+-- Pending highlights for files that weren't open when modified
+-- { [filepath] = { modified = {line_nr, ...}, added = {line_nr, ...}, timestamp = number } }
+M._pending_highlights = {}
+
 ---Get or create the highlight namespace
 ---@return integer
 local function get_namespace()
@@ -38,7 +42,7 @@ end
 ---@param old_lines string[] Lines before reload
 ---@param new_lines string[] Lines after reload
 ---@return table changed_lines { added = {line_nr, ...}, modified = {line_nr, ...} }
-local function compute_changed_lines(old_lines, new_lines)
+function M.compute_changed_lines(old_lines, new_lines)
   local result = {
     added = {},
     modified = {},
@@ -145,7 +149,7 @@ function M.highlight_buffer_changes(bufnr, old_lines)
   local new_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   
   -- Compute what changed
-  local changed_lines = compute_changed_lines(old_lines, new_lines)
+  local changed_lines = M.compute_changed_lines(old_lines, new_lines)
   
   -- Apply highlights
   M.apply_highlights(bufnr, changed_lines)
@@ -251,6 +255,72 @@ end
 function M.has_highlights(bufnr)
   bufnr = bufnr or vim.api.nvim_get_current_buf()
   return M._highlighted_buffers[bufnr] == true
+end
+
+---Store pending highlights for a file that isn't currently open
+---@param filepath string Absolute path to the file
+---@param changed_lines table { added = {...}, modified = {...} }
+function M.store_pending_highlights(filepath, changed_lines)
+  local total = #(changed_lines.modified or {}) + #(changed_lines.added or {})
+  if total == 0 then return end
+  
+  M._pending_highlights[filepath] = {
+    modified = changed_lines.modified or {},
+    added = changed_lines.added or {},
+    timestamp = os.time(),
+  }
+end
+
+---Check and apply pending highlights when a buffer is opened
+---@param bufnr integer Buffer number
+---@return boolean applied Whether highlights were applied
+function M.apply_pending_highlights(bufnr)
+  if not vim.api.nvim_buf_is_valid(bufnr) then return false end
+  
+  local cfg = config.get()
+  if not cfg.highlight_changes then return false end
+  
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+  if filepath == '' then return false end
+  
+  filepath = vim.fn.fnamemodify(filepath, ':p')
+  local pending = M._pending_highlights[filepath]
+  
+  if not pending then return false end
+  
+  -- Clear pending (we're about to apply them)
+  M._pending_highlights[filepath] = nil
+  
+  -- Apply the highlights
+  M.apply_highlights(bufnr, {
+    modified = pending.modified,
+    added = pending.added,
+  })
+  
+  local total = #pending.modified + #pending.added
+  if total > 0 then
+    local util = require('cursor-agent.util')
+    util.notify(string.format('Applied %d pending highlight(s)', total), vim.log.levels.INFO)
+  end
+  
+  return total > 0
+end
+
+---Clear pending highlights for a file
+---@param filepath string|nil Absolute path (nil clears all)
+function M.clear_pending_highlights(filepath)
+  if filepath then
+    M._pending_highlights[filepath] = nil
+  else
+    M._pending_highlights = {}
+  end
+end
+
+---Check if a file has pending highlights
+---@param filepath string
+---@return boolean
+function M.has_pending_highlights(filepath)
+  return M._pending_highlights[filepath] ~= nil
 end
 
 return M
