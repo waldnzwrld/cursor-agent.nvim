@@ -8,9 +8,11 @@ local highlight = require('cursor-agent.highlight')
 M._watchers = {} -- { [filepath] = { handle = uv.fs_event, bufnr = number } }
 M._enabled = false
 M._debounce_timers = {} -- { [filepath] = timer_handle }
-M._pending_reloads = {} -- { [filepath] = { bufnr = number, old_lines = string[] } }
+M._reloading = {} -- { [filepath] = true } -- Guard against re-entrancy
+M._cooldown = {} -- { [filepath] = timestamp } -- Cooldown after reload
 
 local DEBOUNCE_MS = 100 -- Debounce file change events
+local COOLDOWN_MS = 1000 -- Ignore events for this long after a reload
 
 ---Check if a buffer should be auto-reloaded
 ---@param bufnr integer
@@ -35,13 +37,31 @@ end
 local function reload_buffer(bufnr, filepath)
   if not should_reload_buffer(bufnr) then return end
   
+  -- Guard: Don't reload if already reloading this file
+  if M._reloading[filepath] then return end
+  
+  -- Cooldown: Don't reload if we just reloaded this file
+  local cooldown_time = M._cooldown[filepath]
+  if cooldown_time and (uv.now() - cooldown_time) < COOLDOWN_MS then
+    return
+  end
+  
   -- Check if file still exists
   local stat = uv.fs_stat(filepath)
   if not stat then return end
   
+  -- Set reloading guard
+  M._reloading[filepath] = true
+  
   vim.schedule(function()
-    if not vim.api.nvim_buf_is_valid(bufnr) then return end
-    if vim.bo[bufnr].modified then return end
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+      M._reloading[filepath] = nil
+      return
+    end
+    if vim.bo[bufnr].modified then
+      M._reloading[filepath] = nil
+      return
+    end
     
     -- Capture buffer contents BEFORE reload for highlighting
     local old_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
@@ -61,6 +81,10 @@ local function reload_buffer(bufnr, filepath)
         vim.cmd('silent! edit!')
       end)
     end)
+    
+    -- Set cooldown timestamp BEFORE clearing guard
+    M._cooldown[filepath] = uv.now()
+    M._reloading[filepath] = nil
     
     if ok then
       -- Restore cursor positions (clamped to valid range)
@@ -198,25 +222,8 @@ function M.setup_autocmds()
     end,
   })
   
-  -- Run checktime when entering a buffer (fallback for edge cases)
-  vim.api.nvim_create_autocmd('BufEnter', {
-    group = group,
-    callback = function()
-      if not M._enabled then return end
-      -- Don't run checktime in terminal buffers
-      if vim.bo.buftype == 'terminal' then return end
-      pcall(vim.cmd, 'silent! checktime')
-    end,
-  })
-  
-  -- Run checktime when Neovim gains focus
-  vim.api.nvim_create_autocmd('FocusGained', {
-    group = group,
-    callback = function()
-      if not M._enabled then return end
-      pcall(vim.cmd, 'silent! checktime')
-    end,
-  })
+  -- NOTE: Removed BufEnter checktime - it caused reload loops.
+  -- File watchers are sufficient for detecting external changes.
 end
 
 ---Enable automatic buffer reloading
@@ -240,6 +247,10 @@ function M.disable()
   for filepath, _ in pairs(M._watchers) do
     unwatch_file(filepath)
   end
+  
+  -- Clean up state
+  M._reloading = {}
+  M._cooldown = {}
   
   -- Clean up the autocmd group
   pcall(vim.api.nvim_del_augroup_by_name, 'CursorAgentAutoload')
