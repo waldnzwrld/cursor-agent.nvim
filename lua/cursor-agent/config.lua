@@ -19,8 +19,6 @@ local default_config = {
   position = "right",
   -- Width for attached mode (fraction of screen width, e.g., 0.2 for 1/5 of screen)
   width = 0.2,
-  -- Automatically reload buffers when files are modified by Cursor CLI
-  auto_reload = true,
   -- Highlight lines modified by Cursor Agent until next buffer modification
   highlight_changes = true,
   -- Highlight group for modified lines (created automatically if not defined)

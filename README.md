@@ -1,4 +1,4 @@
-## Cursor Agent Neovim Plugin 
+## Cursor Agent Neovim Plugin
 
 A minimal Neovim plugin to run the Cursor Agent CLI inside a terminal window. Toggle an interactive terminal at your project root, or send the current buffer or a visual selection to Cursor Agent. Supports both floating window and sidebar modes.
 
@@ -54,8 +54,7 @@ By default, interactions happen in a centered floating window. You can configure
 - **:CursorAgent**: Toggle the interactive Cursor Agent terminal (project root). Uses your configured window mode.
 - **:CursorAgentSelection**: Send the current visual selection (writes to a temp file and opens terminal rendering).
 - **:CursorAgentBuffer**: Send the full current buffer (writes to a temp file and opens terminal rendering).
-- **:CursorAgentReload**: Manually check all buffers for external changes and reload them.
-- **:CursorAgentAutoReload [on|off]**: Enable, disable, or toggle automatic buffer reloading.
+- **:CursorAgentClearHighlights [all]**: Clear change highlights from the current buffer (or all buffers with "all").
 
 ### Window Mode Behavior
 
@@ -132,26 +131,23 @@ require("cursor-agent").setup({
   position = "right",         -- Position on right side
   width = 0.2,               -- Use 1/5 of screen width (20%)
   
-  -- Auto-reload buffers when Cursor modifies files
-  auto_reload = true,         -- Enabled by default
+  -- Highlight options
+  highlight_changes = true,   -- Highlight modified lines
+  highlight_group = "CursorAgentChange",  -- Custom highlight group
 })
 ```
 
-### Auto-Reload Feature
+### Change Highlighting
 
-When `auto_reload = true` (the default), buffers are automatically reloaded when Cursor CLI modifies files on disk. This ensures your editor always shows the latest content without manual intervention.
+When Cursor Agent modifies files, the changed lines are highlighted in your buffers. This helps you quickly see what was modified.
 
-How it works:
-- **File watchers**: Uses libuv file system events to detect changes in real-time
-- **Focus-based checks**: Runs `:checktime` when leaving the terminal window or when Neovim gains focus  
-- **Safe reloading**: Buffers with unsaved changes are never automatically reloaded
+- Highlights persist until you make your own edits to the buffer
+- Use `:CursorAgentClearHighlights` to manually clear them
+- Customize the highlight color by defining the `CursorAgentChange` highlight group
 
-You can control this feature with:
-```vim
-:CursorAgentAutoReload on    " Enable auto-reload
-:CursorAgentAutoReload off   " Disable auto-reload
-:CursorAgentAutoReload       " Toggle auto-reload
-:CursorAgentReload           " Manually check all buffers for changes
+```lua
+-- Example: Custom highlight color (add to your config)
+vim.api.nvim_set_hl(0, 'CursorAgentChange', { bg = '#3d5940' })
 ```
 
 ### Advanced Options
@@ -211,6 +207,7 @@ This opens a floating terminal using `termopen`, with the working directory set 
   - **Attached mode**: Creates a vertical split positioned on the left or right side
 - The terminal starts in the detected project root so Cursor Agent has the right context.
 - For selection/buffer commands, the text is written to a temporary file and its path is passed to the CLI as a positional argument.
+- **Buffer synchronization**: The plugin monitors terminal output for file modification markers. When Cursor Agent modifies a file, it emits a marker that triggers an automatic buffer reload with change highlighting.
 
 ## Contributing
 
@@ -218,4 +215,4 @@ Contributions are welcome! If you have ideas or improvements, please open an iss
 
 ## Acknowledgements
 
-- Cursor Agent CLI by Cursor - This plugin was build entirely using GPT-5 in Cursor Agent CLI. Development cost: $0.45 with 10m 34s of API time.
+- Cursor Agent CLI by Cursor
