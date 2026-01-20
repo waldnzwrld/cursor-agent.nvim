@@ -102,11 +102,14 @@ local function watch_file(filepath, bufnr)
         timer:close()
         M._debounce_timers[filepath] = nil
         
-        -- Re-check watcher still exists and buffer is valid
-        local watcher = M._watchers[filepath]
-        if watcher and vim.api.nvim_buf_is_valid(watcher.bufnr) then
-          reload_buffer(watcher.bufnr, filepath)
-        end
+        -- Schedule to main loop - nvim API calls not allowed in fast event context
+        vim.schedule(function()
+          -- Re-check watcher still exists and buffer is valid
+          local watcher = M._watchers[filepath]
+          if watcher and vim.api.nvim_buf_is_valid(watcher.bufnr) then
+            reload_buffer(watcher.bufnr, filepath)
+          end
+        end)
       end)
     end)
   end)
