@@ -156,8 +156,8 @@ M.TOOLS = {
     description = 'Get list of files currently open in Neovim buffers.',
     inputSchema = {
       type = 'object',
-      properties = {},
-      required = {},
+      properties = vim.empty_dict(),  -- JSON object {}
+      required = {},  -- JSON array []
     },
   },
   {
@@ -179,8 +179,8 @@ M.TOOLS = {
     description = 'Clear all change highlights in Neovim.',
     inputSchema = {
       type = 'object',
-      properties = {},
-      required = {},
+      properties = vim.empty_dict(),  -- JSON object {}
+      required = {},  -- JSON array []
     },
   },
 }
@@ -305,7 +305,7 @@ function M.handle_initialize(params)
   return {
     protocolVersion = '2024-11-05',
     capabilities = {
-      tools = {},
+      tools = vim.empty_dict(),  -- Must be JSON object {}, not array []
     },
     serverInfo = {
       name = 'cursor-agent-nvim',
