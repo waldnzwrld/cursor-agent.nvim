@@ -226,6 +226,75 @@ function M._diff_lines(old_lines, new_lines)
   return changed
 end
 
+---Store baseline and apply highlights to a buffer
+---@param bufnr number Buffer number
+---@param filepath string Absolute file path
+---@param baseline string[] Original lines before change
+---@param changed number[] Line numbers that changed
+function M._store_and_highlight(bufnr, filepath, baseline, changed)
+  filepath = vim.fn.fnamemodify(filepath, ':p')
+  
+  -- Store baseline for potential future diffs
+  M._baselines[filepath] = baseline
+  
+  -- Merge with existing changed lines (accumulate across multiple saves)
+  local existing = M._changes[filepath]
+  local line_set = {}
+  
+  if existing and existing.lines then
+    for _, lnum in ipairs(existing.lines) do
+      line_set[lnum] = true
+    end
+  end
+  
+  for _, lnum in ipairs(changed) do
+    line_set[lnum] = true
+  end
+  
+  -- Convert back to sorted array
+  local merged = {}
+  for lnum, _ in pairs(line_set) do
+    table.insert(merged, lnum)
+  end
+  table.sort(merged)
+  
+  M._changes[filepath] = {
+    lines = merged,
+    timestamp = os.time(),
+  }
+  
+  -- Apply highlights
+  pcall(vim.api.nvim_buf_clear_namespace, bufnr, M.NS_ID, 0, -1)
+  
+  local line_count = vim.api.nvim_buf_line_count(bufnr)
+  for _, lnum in ipairs(merged) do
+    if lnum >= 1 and lnum <= line_count then
+      pcall(vim.api.nvim_buf_add_highlight, bufnr, M.NS_ID, M.HL_GROUP, lnum - 1, 0, -1)
+    end
+  end
+  
+  if #merged > 0 then
+    M._highlighted_buffers[bufnr] = true
+  end
+end
+
+---Record a pending change for a file not currently open
+---@param filepath string Absolute file path
+function M.record_pending_change(filepath)
+  filepath = vim.fn.fnamemodify(filepath, ':p')
+  
+  -- Read file from disk as baseline (before external change)
+  -- Note: by the time we get here, the file is already changed on disk
+  -- So we can only mark it as changed, not provide accurate line info
+  if not M._changes[filepath] then
+    M._changes[filepath] = {
+      lines = {},  -- Empty means "whole file changed" when opened
+      pending = true,
+      timestamp = os.time(),
+    }
+  end
+end
+
 ---Clear highlights for a file
 ---@param filepath string
 function M.clear_highlights(filepath)
@@ -257,6 +326,10 @@ function M.clear_all()
   M._baselines = {}
 end
 
+-- Track git index mtime for commit detection
+M._git_index_mtime = nil
+M._git_watcher = nil
+
 ---Setup autocmds
 function M._setup_autocmds()
   local group = vim.api.nvim_create_augroup('CursorAgentMCP', { clear = true })
@@ -274,10 +347,19 @@ function M._setup_autocmds()
       filepath = vim.fn.fnamemodify(filepath, ':p')
       
       -- Check if we have pending changes for this file
-      if M._changes[filepath] then
-        vim.defer_fn(function()
-          M._apply_highlights(ev.buf, filepath)
-        end, 10)
+      local change_info = M._changes[filepath]
+      if change_info then
+        if change_info.pending then
+          -- File was changed while closed - we don't have baseline
+          -- Notify user but don't highlight (can't determine specific lines)
+          local util = require('cursor-agent.util')
+          util.notify('File was modified: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
+          M._changes[filepath] = nil  -- Clear pending state
+        elseif change_info.lines and #change_info.lines > 0 then
+          vim.defer_fn(function()
+            M._apply_highlights(ev.buf, filepath)
+          end, 10)
+        end
       end
     end,
   })
@@ -304,6 +386,74 @@ function M._setup_autocmds()
       end
     end,
   })
+  
+  -- Clear highlights on FocusGained (check for git commits)
+  vim.api.nvim_create_autocmd('FocusGained', {
+    group = group,
+    callback = function()
+      M._check_git_commit()
+    end,
+  })
+  
+  -- Start git index watcher
+  M._start_git_watcher()
+end
+
+---Start watching git index for commits
+function M._start_git_watcher()
+  local util = require('cursor-agent.util')
+  local git_dir = util.get_project_root() .. '/.git'
+  local index_path = git_dir .. '/index'
+  
+  local uv = vim.uv or vim.loop
+  local stat = uv.fs_stat(index_path)
+  if stat then
+    M._git_index_mtime = stat.mtime.sec
+  end
+  
+  -- Watch the git index file
+  if M._git_watcher then
+    pcall(function()
+      M._git_watcher:stop()
+      M._git_watcher:close()
+    end)
+  end
+  
+  M._git_watcher = uv.new_fs_event()
+  if M._git_watcher and stat then
+    pcall(function()
+      M._git_watcher:start(index_path, {}, function(err, filename, events)
+        if err then return end
+        vim.schedule(function()
+          M._check_git_commit()
+        end)
+      end)
+    end)
+  end
+end
+
+---Check if git index changed (commit occurred) and clear highlights
+function M._check_git_commit()
+  local util = require('cursor-agent.util')
+  local git_dir = util.get_project_root() .. '/.git'
+  local index_path = git_dir .. '/index'
+  
+  local uv = vim.uv or vim.loop
+  local stat = uv.fs_stat(index_path)
+  if not stat then return end
+  
+  local new_mtime = stat.mtime.sec
+  if M._git_index_mtime and new_mtime > M._git_index_mtime then
+    -- Git index changed, likely a commit - clear all highlights
+    M.clear_all()
+    util.notify('Highlights cleared (git commit detected)', vim.log.levels.INFO)
+  end
+  M._git_index_mtime = new_mtime
+end
+
+---Called when a new cursor agent request starts
+function M.on_new_request()
+  M.clear_all()
 end
 
 return M

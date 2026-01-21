@@ -203,6 +203,9 @@ function M.ask(opts)
 	local title = opts.title or "Cursor Agent"
 	local cfg = config.get()
 
+	-- Clear previous highlights for new request
+	mcp.on_new_request()
+
 	local base = util.to_argv(cfg.cmd)
 	if not base or #base == 0 then
 		util.err("Invalid cmd configured")
@@ -289,7 +292,9 @@ function M.toggle_terminal()
 		return st.bufnr, st.win
 	end
 
-	-- Spawn a fresh terminal
+	-- Spawn a fresh terminal - clear previous highlights for new request
+	mcp.on_new_request()
+	
 	local argv = util.concat_argv(util.to_argv(cfg.cmd), cfg.args)
 	local root = util.get_project_root()
 	local bufnr, win, job_id

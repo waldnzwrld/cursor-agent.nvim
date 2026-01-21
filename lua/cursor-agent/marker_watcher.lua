@@ -21,6 +21,9 @@ M._debounce_timers = {}
 ---Process the marker file content
 ---@param content string
 local function process_marker_content(content)
+  local mcp = require('cursor-agent.mcp')
+  local util = require('cursor-agent.util')
+  
   -- Each line is a filepath that was modified
   for filepath in content:gmatch('[^\r\n]+') do
     filepath = vim.fn.fnamemodify(filepath, ':p')
@@ -38,16 +41,19 @@ local function process_marker_content(content)
     end
     
     if not target_bufnr then
-      -- File not open, skip
+      -- File not open - record for highlighting when opened
+      mcp.record_pending_change(filepath)
       goto continue
     end
     
     -- Don't reload if buffer has unsaved changes
     if vim.bo[target_bufnr].modified then
-      local util = require('cursor-agent.util')
       util.notify('Skipping reload: ' .. vim.fn.fnamemodify(filepath, ':t') .. ' (unsaved changes)', vim.log.levels.WARN)
       goto continue
     end
+    
+    -- Capture baseline BEFORE reload
+    local baseline = vim.api.nvim_buf_get_lines(target_bufnr, 0, -1, false)
     
     -- Save cursor positions
     local wins = vim.fn.win_findbuf(target_bufnr)
@@ -77,7 +83,13 @@ local function process_marker_content(content)
         end
       end
       
-      local util = require('cursor-agent.util')
+      -- Diff and apply highlights
+      local new_lines = vim.api.nvim_buf_get_lines(target_bufnr, 0, -1, false)
+      local changed = mcp._diff_lines(baseline, new_lines)
+      if #changed > 0 then
+        mcp._store_and_highlight(target_bufnr, filepath, baseline, changed)
+      end
+      
       util.notify('Reloaded: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
     end
     
@@ -175,12 +187,17 @@ end
 local function reload_buffer(bufnr, filepath)
   if not vim.api.nvim_buf_is_valid(bufnr) then return end
   
+  local mcp = require('cursor-agent.mcp')
+  local util = require('cursor-agent.util')
+  
   -- Don't reload if buffer has unsaved changes
   if vim.bo[bufnr].modified then
-    local util = require('cursor-agent.util')
     util.notify('Skipping reload: ' .. vim.fn.fnamemodify(filepath, ':t') .. ' (unsaved changes)', vim.log.levels.WARN)
     return
   end
+  
+  -- Capture baseline BEFORE reload
+  local baseline = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   
   -- Save cursor positions
   local wins = vim.fn.win_findbuf(bufnr)
@@ -210,7 +227,13 @@ local function reload_buffer(bufnr, filepath)
       end
     end
     
-    local util = require('cursor-agent.util')
+    -- Diff and apply highlights
+    local new_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local changed = mcp._diff_lines(baseline, new_lines)
+    if #changed > 0 then
+      mcp._store_and_highlight(bufnr, filepath, baseline, changed)
+    end
+    
     util.notify('Reloaded: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
   end
 end
