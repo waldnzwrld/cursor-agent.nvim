@@ -8,6 +8,9 @@ local util = require('cursor-agent.util')
 -- Baseline storage: { [filepath] = string[] (lines) }
 M._baselines = {}
 
+-- Disk-based baseline directory for unopened files
+M.BASELINE_DIR = vim.fn.stdpath('cache') .. '/cursor-agent-baselines'
+
 -- Change tracking: { [filepath] = { lines = number[], hunks = table[] } }
 M._changes = {}
 
@@ -24,7 +27,63 @@ function M.setup()
     bg = '#2a3a2a',
     default = true,
   })
+  -- Ensure baseline directory exists
+  vim.fn.mkdir(M.BASELINE_DIR, 'p')
   M._setup_autocmds()
+end
+
+---Get disk baseline path for a file
+---@param filepath string
+---@return string
+function M._get_baseline_path(filepath)
+  local encoded = vim.fn.sha256(filepath)
+  return M.BASELINE_DIR .. '/' .. encoded
+end
+
+---Save baseline to disk
+---@param filepath string
+---@param lines string[]
+function M._save_baseline_to_disk(filepath, lines)
+  filepath = vim.fn.fnamemodify(filepath, ':p')
+  local baseline_path = M._get_baseline_path(filepath)
+  local content = table.concat(lines, '\n')
+  local fd = io.open(baseline_path, 'w')
+  if fd then
+    fd:write(content)
+    fd:close()
+  end
+end
+
+---Load baseline from disk
+---@param filepath string
+---@return string[]|nil
+function M._load_baseline_from_disk(filepath)
+  filepath = vim.fn.fnamemodify(filepath, ':p')
+  local baseline_path = M._get_baseline_path(filepath)
+  local fd = io.open(baseline_path, 'r')
+  if not fd then return nil end
+  
+  local content = fd:read('*a')
+  fd:close()
+  if not content then return nil end
+  
+  local lines = {}
+  for line in (content .. '\n'):gmatch('([^\n]*)\n') do
+    table.insert(lines, line)
+  end
+  -- Remove trailing empty if content didn't end with newline
+  if #lines > 0 and lines[#lines] == '' and not content:match('\n$') then
+    table.remove(lines)
+  end
+  return lines
+end
+
+---Clear baseline from disk
+---@param filepath string
+function M._clear_baseline_from_disk(filepath)
+  filepath = vim.fn.fnamemodify(filepath, ':p')
+  local baseline_path = M._get_baseline_path(filepath)
+  pcall(os.remove, baseline_path)
 end
 
 ---Save baseline for a file (called by MCP server before changes)
@@ -234,8 +293,9 @@ end
 function M._store_and_highlight(bufnr, filepath, baseline, changed)
   filepath = vim.fn.fnamemodify(filepath, ':p')
   
-  -- Store baseline for potential future diffs
+  -- Store baseline in memory and on disk
   M._baselines[filepath] = baseline
+  M._save_baseline_to_disk(filepath, baseline)
   
   -- Merge with existing changed lines (accumulate across multiple saves)
   local existing = M._changes[filepath]
@@ -302,6 +362,7 @@ function M.clear_highlights(filepath)
   
   M._changes[filepath] = nil
   M._baselines[filepath] = nil
+  M._clear_baseline_from_disk(filepath)
   
   for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
     if vim.api.nvim_buf_is_valid(bufnr) then
@@ -321,9 +382,29 @@ function M.clear_all()
       pcall(vim.api.nvim_buf_clear_namespace, bufnr, M.NS_ID, 0, -1)
     end
   end
+  
+  -- Clear disk baselines for all tracked files
+  for filepath, _ in pairs(M._changes) do
+    M._clear_baseline_from_disk(filepath)
+  end
+  for filepath, _ in pairs(M._baselines) do
+    M._clear_baseline_from_disk(filepath)
+  end
+  
   M._highlighted_buffers = {}
   M._changes = {}
   M._baselines = {}
+  
+  -- Save fresh baselines for currently open buffers
+  for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.api.nvim_buf_is_valid(bufnr) and vim.bo[bufnr].buftype == '' then
+      local fp = vim.api.nvim_buf_get_name(bufnr)
+      if fp and fp ~= '' then
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        M._save_baseline_to_disk(vim.fn.fnamemodify(fp, ':p'), lines)
+      end
+    end
+  end
 end
 
 -- Track git index mtime for commit detection
@@ -334,7 +415,8 @@ M._git_watcher = nil
 function M._setup_autocmds()
   local group = vim.api.nvim_create_augroup('CursorAgentMCP', { clear = true })
   
-  -- Apply pending highlights when file is opened
+  -- Save baseline when file is first opened (for future change detection)
+  -- Apply pending highlights when file with changes is opened
   vim.api.nvim_create_autocmd('BufReadPost', {
     group = group,
     callback = function(ev)
@@ -350,16 +432,36 @@ function M._setup_autocmds()
       local change_info = M._changes[filepath]
       if change_info then
         if change_info.pending then
-          -- File was changed while closed - we don't have baseline
-          -- Notify user but don't highlight (can't determine specific lines)
-          local util = require('cursor-agent.util')
-          util.notify('File was modified: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
-          M._changes[filepath] = nil  -- Clear pending state
+          -- File was changed while closed - try to load baseline from disk
+          local baseline = M._load_baseline_from_disk(filepath)
+          if baseline then
+            -- We have a baseline! Diff and highlight
+            local current_lines = vim.api.nvim_buf_get_lines(ev.buf, 0, -1, false)
+            local changed = M._diff_lines(baseline, current_lines)
+            if #changed > 0 then
+              M._changes[filepath] = { lines = changed, timestamp = os.time() }
+              M._baselines[filepath] = baseline
+              vim.defer_fn(function()
+                M._apply_highlights(ev.buf, filepath)
+              end, 10)
+            else
+              M._changes[filepath] = nil
+            end
+          else
+            -- No baseline available - just notify
+            local util = require('cursor-agent.util')
+            util.notify('File was modified: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
+            M._changes[filepath] = nil
+          end
         elseif change_info.lines and #change_info.lines > 0 then
           vim.defer_fn(function()
             M._apply_highlights(ev.buf, filepath)
           end, 10)
         end
+      else
+        -- No pending changes - save current content as baseline for future
+        local lines = vim.api.nvim_buf_get_lines(ev.buf, 0, -1, false)
+        M._save_baseline_to_disk(filepath, lines)
       end
     end,
   })

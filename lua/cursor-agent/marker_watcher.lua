@@ -52,8 +52,12 @@ local function process_marker_content(content)
       goto continue
     end
     
-    -- Capture baseline BEFORE reload
-    local baseline = vim.api.nvim_buf_get_lines(target_bufnr, 0, -1, false)
+    -- Capture baseline BEFORE reload - but only if we don't have one yet
+    -- This preserves the original state across multiple saves in one session
+    local baseline = mcp._baselines[filepath]
+    if not baseline then
+      baseline = vim.api.nvim_buf_get_lines(target_bufnr, 0, -1, false)
+    end
     
     -- Save cursor positions
     local wins = vim.fn.win_findbuf(target_bufnr)
@@ -196,8 +200,13 @@ local function reload_buffer(bufnr, filepath)
     return
   end
   
-  -- Capture baseline BEFORE reload
-  local baseline = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  -- Capture baseline BEFORE reload - but only if we don't have one yet
+  -- This preserves the original state across multiple saves in one session
+  local abs_filepath = vim.fn.fnamemodify(filepath, ':p')
+  local baseline = mcp._baselines[abs_filepath]
+  if not baseline then
+    baseline = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  end
   
   -- Save cursor positions
   local wins = vim.fn.win_findbuf(bufnr)
