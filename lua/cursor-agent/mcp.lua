@@ -371,27 +371,35 @@ function M._setup_autocmds()
             local changed = M._diff_lines(baseline, current_lines)
             if #changed > 0 then
               M._changes[filepath] = { lines = changed, timestamp = os.time() }
-              vim.defer_fn(function()
-                M._apply_highlights(ev.buf, filepath)
-              end, 10)
+              local bufnr = ev.buf
+              vim.schedule(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                  M._apply_highlights(bufnr, filepath)
+                end
+              end)
             else
               M._changes[filepath] = nil
             end
           else
             -- No baseline available - just notify
-            local util = require('cursor-agent.util')
             util.notify('File was modified: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
             M._changes[filepath] = nil
           end
         elseif change_info.hunks and #change_info.hunks > 0 then
           -- File was changed via MCP with hunk info - apply highlights
-          vim.defer_fn(function()
-            M._apply_highlights(ev.buf, filepath)
-          end, 10)
+          local bufnr = ev.buf
+          vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(bufnr) then
+              M._apply_highlights(bufnr, filepath)
+            end
+          end)
         elseif change_info.lines and #change_info.lines > 0 then
-          vim.defer_fn(function()
-            M._apply_highlights(ev.buf, filepath)
-          end, 10)
+          local bufnr = ev.buf
+          vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(bufnr) then
+              M._apply_highlights(bufnr, filepath)
+            end
+          end)
         end
       elseif not M._baselines[filepath] then
         -- No pending changes and no baseline - save current content as baseline
