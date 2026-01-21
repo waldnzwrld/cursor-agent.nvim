@@ -38,13 +38,18 @@ function M._register_commands()
   end, { desc = 'Deprecated: use :CursorAgent' })
 
   vim.api.nvim_create_user_command('CursorAgentSelection', function()
-    local sel = context.get_visual_selection()
-    if not sel or sel == '' then
+    local sel_ctx = context.get_visual_selection_with_context()
+    if not sel_ctx or not sel_ctx.content or sel_ctx.content == '' then
       util.notify('No visual selection', vim.log.levels.WARN)
       return
     end
-    local tmp = util.write_tempfile(sel, '.txt')
-    M.ask({ file = tmp, title = 'Selection → Cursor Agent' })
+    -- Format with file context like haunt.sidekick: @/path:L1-L10
+    local line_ref = sel_ctx.start_line == sel_ctx.end_line
+      and string.format(":L%d", sel_ctx.start_line)
+      or string.format(":L%d-L%d", sel_ctx.start_line, sel_ctx.end_line)
+    local header = string.format("@/%s%s", sel_ctx.filepath, line_ref)
+    local formatted = string.format("%s\n```%s\n%s\n```\n", header, sel_ctx.filetype or "", sel_ctx.content)
+    M.send_to_terminal(formatted)
   end, { range = true, desc = 'Send current visual selection to Cursor Agent' })
 
   vim.api.nvim_create_user_command('CursorAgentBuffer', function()
@@ -216,6 +221,63 @@ function M._ensure_keymaps()
       require('cursor-agent').toggle_terminal()
     end, { desc = 'Cursor Agent: Toggle terminal' })
     vim.g.cursor_agent_mapped = true
+  end
+end
+
+--- Send text to the existing cursor-agent terminal without submitting
+--- Opens the terminal if not already open, then sends the text
+---@param text string The text to send to the terminal
+function M.send_to_terminal(text)
+  local st = M._term_state
+  local cfg = config.get()
+  
+  -- Helper: check if the terminal job is still alive
+  local function job_is_alive(job_id)
+    if not job_id or job_id == 0 then return false end
+    local ok, res = pcall(vim.fn.jobwait, { job_id }, 0)
+    if not ok or type(res) ~= 'table' then return false end
+    return res[1] == -1
+  end
+  
+  -- If no live terminal, open one first
+  if not st.job_id or not job_is_alive(st.job_id) then
+    M.toggle_terminal()
+    -- Wait a moment for the terminal to initialize
+    vim.defer_fn(function()
+      if st.job_id and job_is_alive(st.job_id) then
+        -- Send text without trailing newline (no auto-submit)
+        vim.fn.chansend(st.job_id, text)
+      end
+    end, 100)
+    return
+  end
+  
+  -- If terminal exists but window is closed, reopen it
+  if not st.win or not vim.api.nvim_win_is_valid(st.win) then
+    if cfg.window_mode == "attached" then
+      st.win = termui.open_split_win_for_buf(st.bufnr, {
+        position = cfg.position,
+        width = cfg.width,
+      })
+    else
+      st.win = termui.open_float_win_for_buf(st.bufnr, {
+        title = 'Cursor Agent',
+        border = 'rounded',
+        width = 0.6,
+        height = 0.6,
+      })
+    end
+  end
+  
+  -- Send text without trailing newline (no auto-submit)
+  vim.fn.chansend(st.job_id, text)
+  
+  -- Focus the terminal window and enter insert mode
+  if st.win and vim.api.nvim_win_is_valid(st.win) then
+    vim.api.nvim_set_current_win(st.win)
+    vim.schedule(function()
+      pcall(vim.cmd, 'startinsert')
+    end)
   end
 end
 

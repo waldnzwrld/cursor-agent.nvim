@@ -31,7 +31,17 @@ local function get_visual_marks()
   return { start_row = cs[1], start_col = cs[2], end_row = ce[1], end_col = ce[2] }
 end
 
+--- Get visual selection content
+---@return string|nil content The selected text, or nil if invalid
 function M.get_visual_selection()
+  local result = M.get_visual_selection_with_context()
+  if not result then return nil end
+  return result.content
+end
+
+--- Get visual selection with full context (file path, line numbers)
+---@return table|nil result Table with content, filepath, start_line, end_line, filetype
+function M.get_visual_selection_with_context()
   local bufnr = vim.api.nvim_get_current_buf()
   
   -- Validate buffer type (reject terminal, help, etc.)
@@ -42,6 +52,10 @@ function M.get_visual_selection()
   local marks = get_visual_marks()
   if not marks then return nil end
   
+  -- Store original 1-indexed line numbers for context
+  local start_line = marks.start_row
+  local end_line = marks.end_row
+  
   -- Convert to 0-indexed for nvim_buf_get_lines
   local srow, scol = marks.start_row - 1, marks.start_col
   local erow, ecol = marks.end_row - 1, marks.end_col
@@ -50,6 +64,7 @@ function M.get_visual_selection()
   if srow > erow or (srow == erow and scol > ecol) then
     srow, erow = erow, srow
     scol, ecol = ecol, scol
+    start_line, end_line = end_line, start_line
   end
   
   local lines = vim.api.nvim_buf_get_lines(bufnr, srow, erow + 1, false)
@@ -63,10 +78,11 @@ function M.get_visual_selection()
   
   -- Check what visual mode was used
   local mode = vim.fn.visualmode()
+  local content
   
   if mode == "V" then
     -- Line-wise: return full lines as-is
-    return table.concat(lines, "\n")
+    content = table.concat(lines, "\n")
   elseif mode == "v" then
     -- Character-wise: trim to selection bounds
     if #lines == 1 then
@@ -76,7 +92,7 @@ function M.get_visual_selection()
       lines[1] = string.sub(lines[1], scol + 1)
       lines[#lines] = string.sub(lines[#lines], 1, ecol + 1)
     end
-    return table.concat(lines, "\n")
+    content = table.concat(lines, "\n")
   elseif mode == "\22" then
     -- Block-wise (Ctrl-V): extract the rectangular block
     local first_line_len = #lines[1]
@@ -92,11 +108,30 @@ function M.get_visual_selection()
         table.insert(result, "")
       end
     end
-    return table.concat(result, "\n")
+    content = table.concat(result, "\n")
+  else
+    -- Fallback: return full lines
+    content = table.concat(lines, "\n")
   end
   
-  -- Fallback: return full lines
-  return table.concat(lines, "\n")
+  -- Get file context
+  local filepath = vim.api.nvim_buf_get_name(bufnr)
+  local filetype = vim.bo[bufnr].filetype
+  
+  -- Convert to relative path from cwd
+  local relative_path = vim.fn.fnamemodify(filepath, ":.")
+  if relative_path == "" then
+    relative_path = filepath
+  end
+  
+  return {
+    content = content,
+    filepath = relative_path,
+    absolute_path = filepath,
+    start_line = start_line,
+    end_line = end_line,
+    filetype = filetype,
+  }
 end
 
 function M.get_buffer_context()
