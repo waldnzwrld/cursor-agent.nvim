@@ -1,24 +1,31 @@
 local M = {}
 
---- Validate that a buffer can have selections extracted
---- Rejects terminal, help, and other special buffers
----@param bufnr number Buffer number to validate
----@return boolean valid True if buffer is a normal file buffer
-local function validate_buffer(bufnr)
+--- Check buffer type and return info about it
+---@param bufnr number Buffer number to check
+---@return string type "file", "terminal", or "invalid"
+local function get_buffer_type(bufnr)
   if not vim.api.nvim_buf_is_valid(bufnr) then
-    return false
+    return "invalid"
   end
   local buftype = vim.bo[bufnr].buftype
-  -- Only allow normal file buffers (empty buftype)
-  if buftype ~= "" then
-    return false
-  end
   local filepath = vim.api.nvim_buf_get_name(bufnr)
-  -- Reject special buffer schemes (term://, fugitive://, etc.)
-  if filepath:match("^%w+://") then
-    return false
+  
+  -- Terminal buffer
+  if buftype == "terminal" or filepath:match("^term://") then
+    return "terminal"
   end
-  return true
+  
+  -- Reject help, quickfix, and other special buffers (but allow terminal)
+  if buftype ~= "" then
+    return "invalid"
+  end
+  
+  -- Reject other special buffer schemes (fugitive://, etc.) but not term://
+  if filepath:match("^%w+://") and not filepath:match("^term://") then
+    return "invalid"
+  end
+  
+  return "file"
 end
 
 local function get_visual_marks()
@@ -40,14 +47,17 @@ function M.get_visual_selection()
 end
 
 --- Get visual selection with full context (file path, line numbers)
----@return table|nil result Table with content, filepath, start_line, end_line, filetype
+---@return table|nil result Table with content, filepath, start_line, end_line, filetype, is_terminal
 function M.get_visual_selection_with_context()
   local bufnr = vim.api.nvim_get_current_buf()
   
-  -- Validate buffer type (reject terminal, help, etc.)
-  if not validate_buffer(bufnr) then
+  -- Check buffer type
+  local buf_type = get_buffer_type(bufnr)
+  if buf_type == "invalid" then
     return nil
   end
+  
+  local is_terminal = buf_type == "terminal"
   
   local marks = get_visual_marks()
   if not marks then return nil end
@@ -114,9 +124,21 @@ function M.get_visual_selection_with_context()
     content = table.concat(lines, "\n")
   end
   
-  -- Get file context
+  -- Get file context (different for terminals)
   local filepath = vim.api.nvim_buf_get_name(bufnr)
   local filetype = vim.bo[bufnr].filetype
+  
+  if is_terminal then
+    return {
+      content = content,
+      filepath = nil,
+      absolute_path = nil,
+      start_line = nil,
+      end_line = nil,
+      filetype = nil,
+      is_terminal = true,
+    }
+  end
   
   -- Convert to relative path from cwd
   local relative_path = vim.fn.fnamemodify(filepath, ":.")
@@ -131,6 +153,7 @@ function M.get_visual_selection_with_context()
     start_line = start_line,
     end_line = end_line,
     filetype = filetype,
+    is_terminal = false,
   }
 end
 
