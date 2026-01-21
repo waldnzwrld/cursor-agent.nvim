@@ -383,6 +383,11 @@ function M._setup_autocmds()
             util.notify('File was modified: ' .. vim.fn.fnamemodify(filepath, ':t'), vim.log.levels.INFO)
             M._changes[filepath] = nil
           end
+        elseif change_info.hunks and #change_info.hunks > 0 then
+          -- File was changed via MCP with hunk info - apply highlights
+          vim.defer_fn(function()
+            M._apply_highlights(ev.buf, filepath)
+          end, 10)
         elseif change_info.lines and #change_info.lines > 0 then
           vim.defer_fn(function()
             M._apply_highlights(ev.buf, filepath)
@@ -484,6 +489,7 @@ function M._check_git_commit()
 end
 
 ---Called when a new cursor agent request starts
+---Clears previous highlights to start fresh
 function M.on_new_request()
   M.clear_all()
 end
