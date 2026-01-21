@@ -3,6 +3,7 @@ local context = require("cursor-agent.context")
 local util = require("cursor-agent.util")
 local termui = require("cursor-agent.ui.term")
 local marker_watcher = require("cursor-agent.marker_watcher")
+local mcp = require("cursor-agent.mcp")
 
 local M = {}
 
@@ -18,11 +19,105 @@ function M.setup(user_config)
 	M._register_commands()
 	M._ensure_keymaps()
 
+	-- Initialize MCP integration (highlights, baseline management)
+	mcp.setup()
+
+	-- Auto-configure MCP server in cursor config (cross-platform)
+	M._ensure_mcp_config()
+
 	-- Start watching for file modification markers (legacy mechanism)
 	marker_watcher.start(util.get_project_root())
 
 	-- Set up direct file watchers on open buffers (more reliable)
 	marker_watcher.setup_buffer_watchers()
+end
+
+--- Get the cursor config directory (cross-platform)
+---@return string
+function M._get_cursor_config_dir()
+	local home = vim.fn.expand("~")
+	-- Windows uses backslashes, but Lua/Neovim handles forward slashes fine
+	return home .. "/.cursor"
+end
+
+--- Get the path to this plugin's MCP server
+---@return string|nil
+function M._get_mcp_server_path()
+	-- Find plugin root from this file's location
+	local source = debug.getinfo(1, "S").source
+	if source:sub(1, 1) == "@" then
+		source = source:sub(2)
+	end
+	-- Go up from lua/cursor-agent/init.lua to plugin root
+	local plugin_root = vim.fn.fnamemodify(source, ":h:h:h")
+	local server_path = plugin_root .. "/mcp/server.lua"
+
+	if vim.fn.filereadable(server_path) == 1 then
+		return server_path
+	end
+	return nil
+end
+
+--- Ensure MCP config exists in ~/.cursor/mcp.json
+function M._ensure_mcp_config()
+	local server_path = M._get_mcp_server_path()
+	if not server_path then
+		-- MCP server not found, skip silently
+		return
+	end
+
+	local config_dir = M._get_cursor_config_dir()
+	local config_path = config_dir .. "/mcp.json"
+
+	-- Ensure .cursor directory exists
+	vim.fn.mkdir(config_dir, "p")
+
+	-- Read existing config or start fresh
+	local existing_config = {}
+	if vim.fn.filereadable(config_path) == 1 then
+		local content = table.concat(vim.fn.readfile(config_path), "\n")
+		if content and content ~= "" then
+			local ok, parsed = pcall(vim.json.decode, content)
+			if ok and type(parsed) == "table" then
+				existing_config = parsed
+			end
+		end
+	end
+
+	-- Ensure mcpServers table exists
+	if not existing_config.mcpServers then
+		existing_config.mcpServers = {}
+	end
+
+	-- Check if our entry already exists with correct path
+	local our_entry = existing_config.mcpServers["cursor-agent-nvim"]
+	local needs_update = false
+
+	if not our_entry then
+		needs_update = true
+	elseif type(our_entry) == "table" then
+		-- Check if path changed (plugin moved/updated)
+		local existing_args = our_entry.args or {}
+		if existing_args[3] ~= server_path then
+			needs_update = true
+		end
+	end
+
+	if needs_update then
+		existing_config.mcpServers["cursor-agent-nvim"] = {
+			command = "nvim",
+			args = { "--headless", "-l", server_path },
+		}
+
+		-- Write config
+		local json = vim.json.encode(existing_config)
+		local fd = io.open(config_path, "w")
+		if fd then
+			fd:write(json)
+			fd:close()
+			util.notify("MCP config updated: " .. config_path, vim.log.levels.INFO)
+		end
+	end
 end
 
 function M._register_commands()
@@ -94,6 +189,13 @@ function M._register_commands()
 	vim.api.nvim_create_user_command("CursorAgentProcessMarkers", function()
 		marker_watcher.process_now()
 	end, { desc = "Manually process marker file" })
+
+	-- Command to clear all highlights
+	vim.api.nvim_create_user_command("CursorAgentClearHighlights", function()
+		mcp.clear_all()
+		util.notify("Cleared all highlights", vim.log.levels.INFO)
+	end, { desc = "Clear all Cursor Agent change highlights" })
+
 end
 
 function M.ask(opts)
